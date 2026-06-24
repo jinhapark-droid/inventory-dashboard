@@ -744,123 +744,155 @@ function drawVelo() {
 
   const firstCol = dates[0].colIdx;
   const lastCol  = dates[dates.length - 1].colIdx;
-  const days     = dates.length - 1; // 14
+  const days     = dates.length - 1;
+  const medals   = ['🥇','🥈','🥉','4','5'];
 
-  const medals = ['🥇','🥈','🥉','4','5'];
+  // 드릴다운 상태 (열린 카테고리)
+  if (!drawVelo._open) drawVelo._open = new Set();
+
+  // ── 공통: 소분류별 개별 품목 집계 ──
+  const catItems = {}; // cat → [{ name, size, consumed, volume, stock, velocity, daysLeft }]
+  rows.forEach(r => {
+    const cat      = str(r, C.subcat) || str(r, C.cat) || '기타';
+    const consumed = num(r, firstCol) - num(r, lastCol);
+    const vol      = consumed * num(r, C.price);
+    const stock    = num(r, C.warehouse);
+    if (!catItems[cat]) catItems[cat] = [];
+    catItems[cat].push({
+      name: str(r, C.name).replace(/\[.*?\]\s?/, ''),
+      size: str(r, C.size),
+      consumed,
+      volume: consumed > 0 ? vol : 0,
+      stock,
+      velocity: consumed > 0 ? consumed / days : 0,
+      daysLeft: consumed > 0 && stock > 0 ? Math.round(stock / (consumed / days)) : null,
+    });
+  });
+
+  // 드릴다운 행 생성
+  function drillRows(cat, color) {
+    if (!drawVelo._open.has(cat)) return '';
+    const items = (catItems[cat] || [])
+      .filter(it => it.consumed > 0)
+      .sort((a, b) => veloMode === 'volume' ? b.volume - a.volume : b.velocity - a.velocity)
+      .slice(0, 10);
+    if (!items.length) return '';
+
+    const subHead = veloMode === 'volume'
+      ? `<th></th><th>상품명</th><th>사이즈</th><th style="text-align:right">소진량</th><th style="text-align:right">볼륨</th><th style="text-align:right">재고</th>`
+      : `<th></th><th>상품명</th><th>사이즈</th><th style="text-align:right">일 소진</th><th style="text-align:right">재고</th><th style="text-align:right">예상 소진일</th>`;
+
+    const subRows = items.map(it => {
+      const dl = it.daysLeft > 0 ? `${it.daysLeft}일` : it.stock === 0 ? '<span style="color:var(--red)">품절</span>' : '-';
+      if (veloMode === 'volume') {
+        return `<tr style="background:rgba(108,99,255,.04)">
+          <td></td>
+          <td style="font-size:12px;padding-left:24px;color:var(--text)">${it.name}</td>
+          <td style="font-size:12px;color:var(--muted)">${it.size}</td>
+          <td style="text-align:right;font-size:12px">${it.consumed}</td>
+          <td style="text-align:right;font-size:12px;color:var(--accent)">₩${Math.round(it.volume/10000).toLocaleString()}만</td>
+          <td style="text-align:right;font-size:12px">${it.stock.toLocaleString()}</td>
+        </tr>`;
+      } else {
+        return `<tr style="background:rgba(108,99,255,.04)">
+          <td></td>
+          <td style="font-size:12px;padding-left:24px;color:var(--text)">${it.name}</td>
+          <td style="font-size:12px;color:var(--muted)">${it.size}</td>
+          <td style="text-align:right;font-size:12px;color:var(--accent)">${it.velocity.toFixed(1)}</td>
+          <td style="text-align:right;font-size:12px">${it.stock.toLocaleString()}</td>
+          <td style="text-align:right;font-size:12px">${dl}</td>
+        </tr>`;
+      }
+    }).join('');
+
+    return `<tr style="background:var(--surface2)"><td colspan="6" style="padding:0"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="border-top:1px solid ${color}33">${subHead}</tr></thead>
+      <tbody>${subRows}</tbody>
+    </table></td></tr>`;
+  }
+
+  function toggleDrill(cat) {
+    if (drawVelo._open.has(cat)) drawVelo._open.delete(cat);
+    else drawVelo._open.add(cat);
+    drawVelo();
+  }
+  window._toggleDrill = toggleDrill;
 
   if (veloMode === 'volume') {
-    // ── 볼륨 순: 소분류별 (원가 × 소진량) 합계 ──
     document.getElementById('veloHead').innerHTML =
-      '<th>순위</th><th>소분류</th><th style="text-align:right">소진량 (개)</th><th style="text-align:right">볼륨 (원가×소진)</th><th style="text-align:right">현재 재고</th>';
+      '<th></th><th>소분류</th><th style="text-align:right">소진량 (개)</th><th style="text-align:right">볼륨 (원가×소진)</th><th style="text-align:right">현재 재고</th><th></th>';
 
     const catMap = {};
-    rows.forEach(r => {
-      const cat      = str(r, C.subcat) || str(r, C.cat) || '기타';
-      const consumed = num(r, firstCol) - num(r, lastCol);
-      if (consumed <= 0) return;
-      const vol = consumed * num(r, C.price);
-      if (!catMap[cat]) catMap[cat] = { consumed: 0, volume: 0, stock: 0 };
-      catMap[cat].consumed += consumed;
-      catMap[cat].volume   += vol;
-      catMap[cat].stock    += num(r, C.warehouse);
+    Object.entries(catItems).forEach(([cat, items]) => {
+      const consumed = items.reduce((s,i) => s + i.consumed, 0);
+      const volume   = items.reduce((s,i) => s + i.volume, 0);
+      const stock    = items.reduce((s,i) => s + i.stock, 0);
+      if (consumed > 0) catMap[cat] = { consumed, volume, stock };
     });
 
     const top5 = Object.entries(catMap)
-      .sort((a, b) => b[1].volume - a[1].volume)
-      .slice(0, 5)
-      .map(([cat, d]) => ({ cat, ...d }));
+      .sort((a,b) => b[1].volume - a[1].volume).slice(0,5)
+      .map(([cat,d]) => ({ cat, ...d }));
 
     destroyChart('veloChart');
     charts.veloChart = new Chart(document.getElementById('veloChart'), {
       type: 'bar',
-      data: {
-        labels: top5.map(v => v.cat),
-        datasets: [{
-          label: '볼륨 (₩)',
-          data: top5.map(v => Math.round(v.volume)),
-          backgroundColor: top5.map((_, i) => PALETTE[i] + 'cc'),
-          borderRadius: 6, borderSkipped: false,
-        }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: true,
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: ctx => '₩' + Math.round(ctx.raw).toLocaleString() } }
-        },
-        scales: {
-          x: { ticks: { color: '#777788', callback: v => '₩' + Math.round(v/10000) + '만' }, grid: { color: '#2e2e3e' } },
-          y: { ticks: { color: '#e8e8f0', font: { size: 11 } }, grid: { color: '#2e2e3e' } }
-        }
-      }
+      data: { labels: top5.map(v=>v.cat), datasets: [{ label:'볼륨(₩)', data: top5.map(v=>Math.round(v.volume)), backgroundColor: top5.map((_,i)=>PALETTE[i]+'cc'), borderRadius:6, borderSkipped:false }] },
+      options: { indexAxis:'y', responsive:true, maintainAspectRatio:true, plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>'₩'+Math.round(ctx.raw).toLocaleString()}}},
+        scales:{ x:{ticks:{color:'#777788',callback:v=>'₩'+Math.round(v/10000)+'만'},grid:{color:'#2e2e3e'}}, y:{ticks:{color:'#e8e8f0',font:{size:11}},grid:{color:'#2e2e3e'}} } }
     });
 
-    document.getElementById('veloTbl').innerHTML = top5.map((v, i) => `<tr>
-      <td style="text-align:center;font-size:15px">${medals[i]}</td>
-      <td>${v.cat}</td>
-      <td style="text-align:right">${v.consumed.toLocaleString()}</td>
-      <td style="text-align:right;font-weight:700;color:var(--accent)">₩${Math.round(v.volume/10000).toLocaleString()}만</td>
-      <td style="text-align:right">${v.stock.toLocaleString()}</td>
-    </tr>`).join('');
+    document.getElementById('veloTbl').innerHTML = top5.map((v,i) => {
+      const isOpen = drawVelo._open.has(v.cat);
+      const color  = PALETTE[i];
+      return `<tr style="cursor:pointer;border-left:3px solid ${color}" onclick="_toggleDrill('${v.cat.replace(/'/g,"\\'")}')">
+        <td style="text-align:center;font-size:15px">${medals[i]}</td>
+        <td><span style="color:${color};font-weight:600">${v.cat}</span></td>
+        <td style="text-align:right">${v.consumed.toLocaleString()}</td>
+        <td style="text-align:right;font-weight:700;color:var(--accent)">₩${Math.round(v.volume/10000).toLocaleString()}만</td>
+        <td style="text-align:right">${v.stock.toLocaleString()}</td>
+        <td style="color:var(--muted);font-size:12px">${isOpen?'▲ 닫기':'▼ 상세'}</td>
+      </tr>${drillRows(v.cat, color)}`;
+    }).join('');
 
   } else {
-    // ── 소진속도: 소분류별 집계 ──
-    const divisor = veloMode === 'daily' ? days : (days / 7);
+    const divisor = veloMode === 'daily' ? days : (days/7);
     const unit    = veloMode === 'daily' ? '일 평균 소진 (개)' : '주 평균 소진 (개)';
 
     document.getElementById('veloHead').innerHTML =
-      `<th>순위</th><th>소분류</th><th style="text-align:right">${unit}</th><th style="text-align:right">현재 재고</th><th style="text-align:right">예상 소진일</th>`;
+      `<th></th><th>소분류</th><th style="text-align:right">${unit}</th><th style="text-align:right">현재 재고</th><th style="text-align:right">예상 소진일</th><th></th>`;
 
     const catMap = {};
-    rows.forEach(r => {
-      const cat      = str(r, C.subcat) || str(r, C.cat) || '기타';
-      const consumed = num(r, firstCol) - num(r, lastCol);
-      if (consumed <= 0) return;
-      if (!catMap[cat]) catMap[cat] = { consumed: 0, stock: 0 };
-      catMap[cat].consumed += consumed;
-      catMap[cat].stock    += num(r, C.warehouse);
+    Object.entries(catItems).forEach(([cat, items]) => {
+      const consumed = items.reduce((s,i) => s + i.consumed, 0);
+      const stock    = items.reduce((s,i) => s + i.stock, 0);
+      if (consumed > 0) catMap[cat] = { consumed, stock };
     });
 
     const top5 = Object.entries(catMap)
-      .map(([cat, d]) => ({
-        cat,
-        velocity: d.consumed / divisor,
-        stock: d.stock,
-        daysLeft: d.consumed > 0 ? Math.round(d.stock / (d.consumed / days)) : null,
-      }))
-      .sort((a, b) => b.velocity - a.velocity)
-      .slice(0, 5);
+      .map(([cat,d]) => ({ cat, velocity: d.consumed/divisor, stock: d.stock, daysLeft: Math.round(d.stock/(d.consumed/days)) }))
+      .sort((a,b) => b.velocity - a.velocity).slice(0,5);
 
     destroyChart('veloChart');
     charts.veloChart = new Chart(document.getElementById('veloChart'), {
       type: 'bar',
-      data: {
-        labels: top5.map(v => v.cat),
-        datasets: [{
-          label: unit,
-          data: top5.map(v => +v.velocity.toFixed(1)),
-          backgroundColor: top5.map((_, i) => PALETTE[i] + 'cc'),
-          borderRadius: 6, borderSkipped: false,
-        }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: true,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { color: '#777788' }, grid: { color: '#2e2e3e' } },
-          y: { ticks: { color: '#e8e8f0', font: { size: 11 } }, grid: { color: '#2e2e3e' } }
-        }
-      }
+      data: { labels: top5.map(v=>v.cat), datasets: [{ label:unit, data:top5.map(v=>+v.velocity.toFixed(1)), backgroundColor:top5.map((_,i)=>PALETTE[i]+'cc'), borderRadius:6, borderSkipped:false }] },
+      options: { indexAxis:'y', responsive:true, maintainAspectRatio:true, plugins:{legend:{display:false}},
+        scales:{ x:{ticks:{color:'#777788'},grid:{color:'#2e2e3e'}}, y:{ticks:{color:'#e8e8f0',font:{size:11}},grid:{color:'#2e2e3e'}} } }
     });
 
-    document.getElementById('veloTbl').innerHTML = top5.map((v, i) => {
-      const dl = v.daysLeft > 0 && v.stock > 0 ? `${v.daysLeft}일` : v.stock === 0 ? '<span style="color:var(--red)">품절</span>' : '-';
-      return `<tr>
+    document.getElementById('veloTbl').innerHTML = top5.map((v,i) => {
+      const dl = v.daysLeft > 0 && v.stock > 0 ? `${v.daysLeft}일` : v.stock===0 ? '<span style="color:var(--red)">품절</span>' : '-';
+      const isOpen = drawVelo._open.has(v.cat);
+      const color  = PALETTE[i];
+      return `<tr style="cursor:pointer;border-left:3px solid ${color}" onclick="_toggleDrill('${v.cat.replace(/'/g,"\\'")}')">
         <td style="text-align:center;font-size:15px">${medals[i]}</td>
-        <td>${v.cat}</td>
+        <td><span style="color:${color};font-weight:600">${v.cat}</span></td>
         <td style="text-align:right;font-weight:700;color:var(--accent)">${v.velocity.toFixed(1)}</td>
         <td style="text-align:right">${v.stock.toLocaleString()}</td>
         <td style="text-align:right">${dl}</td>
-      </tr>`;
+        <td style="color:var(--muted);font-size:12px">${isOpen?'▲ 닫기':'▼ 상세'}</td>
+      </tr>${drillRows(v.cat, color)}`;
     }).join('');
   }
 }
