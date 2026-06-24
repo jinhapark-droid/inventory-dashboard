@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Urban Side — 재고 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0f0f13;
+  --surface: #1a1a22;
+  --surface2: #22222e;
+  --border: #2e2e3e;
+  --accent: #6c63ff;
+  --green: #43e97b;
+  --orange: #f7971e;
+  --red: #ff4d6d;
+  --yellow: #ffd166;
+  --text: #e8e8f0;
+  --muted: #777788;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+/* ── Header ── */
+.header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 200;
+}
+.logo { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
+.badge { background: var(--accent); color: #fff; border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; margin-left: 10px; }
+.hdr-right { display: flex; align-items: center; gap: 12px; }
+.ts { font-size: 12px; color: var(--muted); }
+.btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: .15s; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Nav ── */
+.nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; }
+.tab { padding: 13px 20px; cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 500; border-bottom: 2px solid transparent; transition: .15s; }
+.tab:hover { color: var(--text); }
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Layout ── */
+.main { padding: 24px 28px; max-width: 1440px; margin: 0 auto; }
+.view { display: none; }
+.view.on { display: block; }
+
+/* ── Loading / Error ── */
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; gap: 14px; }
+.spin { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.err { background: rgba(255,77,109,.08); border: 1px solid var(--red); border-radius: 10px; padding: 18px 22px; color: var(--red); line-height: 1.6; }
+
+/* ── KPI ── */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; position: relative; overflow: hidden; }
+.kpi::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--kpi-color, var(--accent)); }
+.kpi-label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.kpi-val { font-size: 28px; font-weight: 700; line-height: 1; }
+.kpi-sub { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+/* ── Section ── */
+.sec { margin-bottom: 24px; }
+.sec-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.sec-title { font-size: 14px; font-weight: 600; }
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── Card ── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.card canvas { max-height: 320px; }
+
+/* ── Grid ── */
+.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+@media (max-width: 1000px) { .g3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .g2, .g3 { grid-template-columns: 1fr; } }
+
+/* ── Toggle ── */
+.tgl { display: flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tgl-btn { padding: 6px 14px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; border: none; background: none; transition: .15s; }
+.tgl-btn.on { background: var(--accent); color: #fff; }
+
+/* ── Select ── */
+select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 11px; border-radius: 8px; font-size: 13px; outline: none; cursor: pointer; }
+select:focus { border-color: var(--accent); }
+
+/* ── Table ── */
+.tbl-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: auto; max-height: 480px; }
+table { width: 100%; border-collapse: collapse; min-width: 600px; }
+thead { position: sticky; top: 0; background: var(--surface2); z-index: 10; }
+th { padding: 11px 14px; text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+td { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 13px; }
+tbody tr:hover { background: var(--surface2); }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+.pill-ok  { background: rgba(67,233,123,.12); color: var(--green); }
+.pill-low { background: rgba(255,77,109,.12); color: var(--red); }
+.pill-out { background: rgba(255,77,109,.2);  color: var(--red); }
+.pill-high{ background: rgba(247,151,30,.12); color: var(--orange); }
+
+/* ── Bar ── */
+.bar-list { display: flex; flex-direction: column; gap: 8px; }
+.bar-row { display: flex; align-items: center; gap: 10px; }
+.bar-key { width: 80px; font-size: 12px; color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-bg { flex: 1; height: 10px; background: var(--surface2); border-radius: 5px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 5px; background: var(--accent); transition: width .5s; }
+.bar-val { width: 56px; font-size: 12px; text-align: right; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex;align-items:center">
+    <span class="logo">URBAN SIDE</span>
+    <span class="badge">25FW · 25SS</span>
+  </div>
+  <div class="hdr-right">
+    <span class="ts" id="ts">로딩 중...</span>
+    <button class="btn" onclick="init()">↻ 새로고침</button>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="tab on"  onclick="switchTab('summary',this)">재고 현황 요약</div>
+  <div class="tab"     onclick="switchTab('trend',this)">일별 재고 추이</div>
+  <div class="tab"     onclick="switchTab('dash',this)">종합 대시보드</div>
+</div>
+
+<div class="main">
+
+  <!-- ══════════ VIEW: SUMMARY ══════════ -->
+  <div class="view on" id="v-summary">
+    <div class="loading" id="lsummary"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
+    <div id="csummary" style="display:none">
+      <div class="kpi-row" id="kpi1"></div>
+      <div class="g2 sec">
+        <div>
+          <div class="sec-hdr"><span class="sec-title">카테고리별 재고</span></div>
+          <div class="card"><canvas id="catChart"></canvas></div>
+        </div>
+        <div>
+          <div class="sec-hdr"><span class="sec-title">사이즈별 재고</span></div>
+          <div class="card" id="sizeCard" style="display:flex;flex-direction:column;justify-content:center;min-height:260px"></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-hdr">
+          <span class="sec-title">품목별 재고 상세</span>
+          <div class="controls">
+            <select id="selSeason" onchange="drawTable()"><option value="">전체 시즌</option></select>
+            <select id="selCat" onchange="drawTable()"><option value="">전체 카테고리</option></select>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr>
+            <th>상품명</th><th>시즌</th><th>카테고리</th><th>사이즈</th>
+            <th style="text-align:right">창고재고</th><th style="text-align:right">대기</th><th style="text-align:right">보험</th><th>상태</th>
+          </tr></thead><tbody id="tbody1"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ VIEW: TREND ══════════ -->
+  <div class="view" id="v-trend">
+    <div class="loading" id="ltrend"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
+    <div id="ctrend" style="display:none">
+      <div class="sec">
+        <div class="sec-hdr">
+          <span class="sec-title">일별 재고 추이</span>
+          <div class="controls">
+            <div class="tgl">
+              <button class="tgl-btn on" onclick="setMode('product',this)">품목별</button>
+              <button class="tgl-btn"    onclick="setMode('subcat',this)">소분류별</button>
+              <button class="tgl-btn"    onclick="setMode('season',this)">시즌별</button>
+              <button class="tgl-btn"    onclick="setMode('category',this)">카테고리별</button>
+            </div>
+            <select id="trendSel" onchange="drawTrend()"></select>
+            <select id="trendSel2" onchange="drawTrend()" style="display:none">
+              <option value="all">전체 사이즈</option>
+            </select>
+          </div>
+        </div>
+        <div class="card"><canvas id="trendChart" style="max-height:380px"></canvas></div>
+      </div>
+      <div class="sec">
+        <div class="sec-hdr"><span class="sec-title">시즌별 전체 추이 (일별 합계)</span></div>
+        <div class="card"><canvas id="seasonTrendChart" style="max-height:240px"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ VIEW: DASHBOARD ══════════ -->
+  <div class="view" id="v-dash">
+    <div class="loading" id="ldash"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
+    <div id="cdash" style="display:none">
+      <div class="kpi-row" id="kpi2"></div>
+      <div class="g3 sec">
+        <div>
+          <div class="sec-hdr"><span class="sec-title">카테고리별</span></div>
+          <div class="card"><canvas id="d-cat" style="max-height:220px"></canvas></div>
+        </div>
+        <div>
+          <div class="sec-hdr"><span class="sec-title">시즌별</span></div>
+          <div class="card"><canvas id="d-season" style="max-height:220px"></canvas></div>
+        </div>
+        <div>
+          <div class="sec-hdr"><span class="sec-title">소분류별</span></div>
+          <div class="card"><canvas id="d-sub" style="max-height:220px"></canvas></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-hdr"><span class="sec-title">전체 일별 재고 추이</span></div>
+        <div class="card"><canvas id="d-trend" style="max-height:240px"></canvas></div>
+      </div>
+      <div class="g2 sec">
+        <div>
+          <div class="sec-hdr"><span class="sec-title">재고 부족 품목 (10개 이하)</span></div>
+          <div class="tbl-wrap" style="max-height:320px">
+            <table><thead><tr><th>상품명</th><th>시즌</th><th>사이즈</th><th style="text-align:right">창고재고</th><th style="text-align:right">대기</th></tr></thead>
+            <tbody id="lowTbl"></tbody></table>
+          </div>
+        </div>
+        <div>
+          <div class="sec-hdr"><span class="sec-title">사이즈별 재고 분포</span></div>
+          <div class="card" id="d-size" style="display:flex;flex-direction:column;justify-content:center;min-height:240px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Constants ───────────────────────────────────────────
+const SHEET = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0';
+const GID   = '1461767551';
+
+// Confirmed column indices from data inspection
+const C = {
+  name:      0,  // 상품명
+  code:      1,  // 상품코드
+  cat:       6,  // 상품중분류
+  subcat:    7,  // 상품소분류
+  season:    8,  // 시즌
+  line:      9,  // 라인
+  size:      11, // 옵션(사이즈)
+  price:     5,  // 원가
+  receipt:   13, // 입고
+  warehouse: 14, // 창고+일반재고
+  waiting:   15, // 대기재고
+  insurance: 16, // 보험재고
+  // 날짜별 재고: cols 18–32 (15일치, Jun9–Jun23)
+  dateStart: 18,
+  dateEnd:   32,
+};
+
+const PALETTE = [
+  '#6c63ff','#43e97b','#f7971e','#ff6584',
+  '#4fc3f7','#a29bfe','#fd79a8','#55efc4',
+  '#ffeaa7','#74b9ff','#ff7675','#00b894',
+];
+
+// ─── State ───────────────────────────────────────────────
+let rows  = [];          // data rows (each is an array)
+let dates = [];          // [{serial, label}] for date columns
+let charts = {};
+let trendMode = 'product';
+
+// ─── Init ─────────────────────────────────────────────────
+async function init() {
+  document.getElementById('ts').textContent = '로딩 중…';
+  try {
+    await fetchData();
+    rendered['summary'] = true;
+    renderSummary();
+    // Trend and dash are rendered lazily when their tab is first clicked
+    document.getElementById('ts').textContent = '최종 업데이트: ' + new Date().toLocaleString('ko-KR');
+  } catch(e) {
+    ['lsummary','ltrend','ldash'].forEach(id => {
+      document.getElementById(id).innerHTML = `<div class="err">❌ 데이터 로드 실패<br><small>${e.message}</small></div>`;
+    });
+  }
+}
+
+async function fetchData() {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:json&gid=${GID}`;
+  const res  = await fetch(url);
+  const text = await res.text();
+  const json = JSON.parse(text.replace(/^[^(]+\(/, '').replace(/\);?\s*$/, ''));
+
+  const allRows = json.table.rows;
+  // Row 0 = header, skip it; remaining = data
+  rows = allRows.slice(1)
+    .map(r => (r.c || []).map(c => (c && c.v !== null && c.v !== undefined) ? c.v : ''))
+    .filter(r => String(r[0] || '').trim() !== '');
+
+  // Build date labels from header row (row 0), cols 18-32
+  const hdr = allRows[0].c;
+  dates = [];
+  for (let i = C.dateStart; i <= C.dateEnd; i++) {
+    const cell = hdr[i];
+    if (!cell) continue;
+    const serial = cell.v;
+    if (typeof serial !== 'number') continue;
+    dates.push({ serial, label: excelDateToLabel(serial), colIdx: i });
+  }
+}
+
+// Excel serial → "M/D" label
+function excelDateToLabel(serial) {
+  // Excel epoch: Dec 30, 1899
+  const ms = (Math.floor(serial) - 25569) * 86400000;
+  const d = new Date(ms);
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+function num(row, col) {
+  const v = row[col];
+  if (v === '' || v === null || v === undefined) return 0;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+function str(row, col) { return String(row[col] ?? '').trim(); }
+
+// ─── Summary ─────────────────────────────────────────────
+function renderSummary() {
+  document.getElementById('lsummary').style.display = 'none';
+  document.getElementById('csummary').style.display = 'block';
+
+  const total   = rows.reduce((s, r) => s + num(r, C.warehouse), 0);
+  const waiting = rows.reduce((s, r) => s + num(r, C.waiting), 0);
+  const totalVal= rows.reduce((s, r) => s + num(r, C.warehouse) * num(r, C.price), 0);
+  const lowCnt  = rows.filter(r => num(r, C.warehouse) > 0 && num(r, C.warehouse) <= 10).length;
+  const outCnt  = rows.filter(r => num(r, C.warehouse) === 0).length;
+
+  document.getElementById('kpi1').innerHTML = kpiHTML([
+    { label:'총 재고 수량', val: total.toLocaleString() + ' 개', sub: `SKU ${rows.length.toLocaleString()}개`, color: 'var(--accent)' },
+    { label:'재고 금액',    val: '₩' + Math.round(totalVal/10000).toLocaleString() + '만', sub: '원가 기준', color: 'var(--green)' },
+    { label:'대기 재고',    val: waiting.toLocaleString() + ' 개', sub: '입고 예정', color: 'var(--orange)' },
+    { label:'재고 부족',    val: lowCnt + ' 개', sub: '10개 이하 SKU', color: 'var(--yellow)' },
+    { label:'품절',         val: outCnt + ' 개', sub: '0개 SKU', color: 'var(--red)' },
+  ]);
+
+  // Category chart
+  const catMap = groupSum(rows, r => str(r, C.cat) || '기타', r => num(r, C.warehouse));
+  destroyChart('catChart');
+  charts.catChart = new Chart(document.getElementById('catChart'), {
+    type: 'bar',
+    data: {
+      labels: Object.keys(catMap),
+      datasets: [{ label:'재고(개)', data: Object.values(catMap), backgroundColor: paletteAlpha(Object.keys(catMap).length, '.8'), borderRadius: 6, borderSkipped: false }]
+    },
+    options: barOpts()
+  });
+
+  // Size bar (apparel only)
+  const STD_SIZES = ['XS','S','M','L','XL','XXL','FREE'];
+  const apparelRows = rows.filter(r => str(r, C.cat) === '어패럴');
+  const sizeMap = groupSum(apparelRows, r => {
+    const sz = str(r, C.size).toUpperCase();
+    return STD_SIZES.includes(sz) ? sz : '기타';
+  }, r => num(r, C.warehouse));
+  const sizeOrder = [...STD_SIZES, '기타'];
+  const szKeys = Object.keys(sizeMap).sort((a,b) => {
+    const ai = sizeOrder.indexOf(a), bi = sizeOrder.indexOf(b);
+    return (ai<0?99:ai) - (bi<0?99:bi);
+  });
+  const szMax = Math.max(...Object.values(sizeMap), 1);
+  document.getElementById('sizeCard').innerHTML =
+    '<div class="bar-list">' +
+    szKeys.map(k => `<div class="bar-row">
+      <div class="bar-key">${k}</div>
+      <div class="bar-bg"><div class="bar-fill" style="width:${Math.round(sizeMap[k]/szMax*100)}%"></div></div>
+      <div class="bar-val">${sizeMap[k].toLocaleString()}</div>
+    </div>`).join('') +
+    '</div>';
+
+  // Season/category filters
+  const seasons = uniq(rows.map(r => str(r, C.season))).sort();
+  const cats    = uniq(rows.map(r => str(r, C.cat))).sort();
+  const s1 = document.getElementById('selSeason');
+  const s2 = document.getElementById('selCat');
+  s1.innerHTML = '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
+  s2.innerHTML = '<option value="">전체 카테고리</option>' + cats.map(c=>`<option>${c}</option>`).join('');
+
+  drawTable();
+}
+
+function drawTable() {
+  const fSeason = document.getElementById('selSeason').value;
+  const fCat    = document.getElementById('selCat').value;
+  const data = rows.filter(r =>
+    (!fSeason || str(r, C.season) === fSeason) &&
+    (!fCat    || str(r, C.cat)    === fCat)
+  );
+  document.getElementById('tbody1').innerHTML = data.slice(0,300).map(r => {
+    const wh = num(r, C.warehouse), wt = num(r, C.waiting), ins = num(r, C.insurance);
+    const pill = wh === 0
+      ? '<span class="pill pill-out">품절</span>'
+      : wh <= 10
+        ? '<span class="pill pill-low">부족</span>'
+        : '<span class="pill pill-ok">정상</span>';
+    return `<tr>
+      <td>${str(r,C.name)}</td>
+      <td>${str(r,C.season)}</td>
+      <td>${str(r,C.cat)}</td>
+      <td>${str(r,C.size)}</td>
+      <td style="text-align:right;font-weight:600">${wh.toLocaleString()}</td>
+      <td style="text-align:right">${wt.toLocaleString()}</td>
+      <td style="text-align:right">${ins.toLocaleString()}</td>
+      <td>${pill}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Trend ───────────────────────────────────────────────
+function renderTrend() {
+  document.getElementById('ltrend').style.display = 'none';
+  document.getElementById('ctrend').style.display = 'block';
+  buildTrendSel();
+  drawTrend();
+  drawSeasonTrend();
+}
+
+function setMode(mode, el) {
+  trendMode = mode;
+  document.querySelectorAll('.tgl-btn').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  const sel2 = document.getElementById('trendSel2');
+  sel2.style.display = mode === 'product' ? '' : 'none';
+  buildTrendSel();
+  drawTrend();
+}
+
+function buildTrendSel() {
+  let keyFn;
+  if (trendMode === 'product')  keyFn = r => str(r, C.line);
+  if (trendMode === 'subcat')   keyFn = r => str(r, C.subcat);
+  if (trendMode === 'season')   keyFn = r => str(r, C.season);
+  if (trendMode === 'category') keyFn = r => str(r, C.cat);
+
+  // Sort items by total stock in date columns (data-rich items first)
+  const scoreMap = {};
+  rows.forEach(r => {
+    const k = keyFn(r); if (!k) return;
+    scoreMap[k] = (scoreMap[k] || 0) + (parseFloat(r[C.dateStart]) || 0);
+  });
+  const items = Object.keys(scoreMap).sort((a,b) => scoreMap[b] - scoreMap[a]);
+
+  const sel = document.getElementById('trendSel');
+  const prev = sel.value;
+  sel.innerHTML = items.map(it => `<option value="${it}">${it}</option>`).join('');
+  if (items.includes(prev)) sel.value = prev;
+
+  if (trendMode === 'product') {
+    const sel2 = document.getElementById('trendSel2');
+    const sizes = ['전체 사이즈', ...uniq(rows.map(r => str(r, C.size)).filter(Boolean)).sort()];
+    sel2.innerHTML = sizes.map(s => `<option value="${s === '전체 사이즈' ? 'all' : s}">${s}</option>`).join('');
+  }
+}
+
+function drawTrend() {
+  if (!dates.length) return;
+  const sel    = document.getElementById('trendSel').value;
+  const sel2   = document.getElementById('trendSel2').value;
+  if (!sel) return;
+
+  let filtered = rows;
+  if (trendMode === 'product')  { filtered = rows.filter(r => str(r, C.line) === sel); if (sel2 !== 'all') filtered = filtered.filter(r => str(r, C.size) === sel2); }
+  if (trendMode === 'subcat')   filtered = rows.filter(r => str(r, C.subcat)  === sel);
+  if (trendMode === 'season')   filtered = rows.filter(r => str(r, C.season)  === sel);
+  if (trendMode === 'category') filtered = rows.filter(r => str(r, C.cat)     === sel);
+
+  const labels = dates.map(d => d.label);
+  const data   = dates.map(d => filtered.reduce((s,r) => s + num(r, d.colIdx), 0));
+
+  destroyChart('trendChart');
+  charts.trendChart = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: sel + (sel2 && sel2 !== 'all' ? ` (${sel2})` : ''),
+      data, borderColor: '#6c63ff', backgroundColor: 'rgba(108,99,255,.1)',
+      fill: true, tension: 0.4, pointRadius: 5, pointHoverRadius: 7,
+      pointBackgroundColor: '#6c63ff',
+    }]},
+    options: lineOpts('재고 수량 (개)')
+  });
+}
+
+function drawSeasonTrend() {
+  if (!dates.length) return;
+  const seasons = uniq(rows.map(r => str(r, C.season)).filter(Boolean)).sort();
+  const labels  = dates.map(d => d.label);
+  const datasets = seasons.map((s, i) => ({
+    label: s,
+    data: dates.map(d => rows.filter(r => str(r, C.season) === s).reduce((sum, r) => sum + num(r, d.colIdx), 0)),
+    borderColor: PALETTE[i % PALETTE.length],
+    backgroundColor: 'transparent',
+    tension: 0.4, pointRadius: 4,
+  }));
+
+  destroyChart('seasonTrendChart');
+  charts.seasonTrendChart = new Chart(document.getElementById('seasonTrendChart'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: lineOpts('재고 합계 (개)')
+  });
+}
+
+// ─── Dashboard ───────────────────────────────────────────
+function renderDash() {
+  document.getElementById('ldash').style.display = 'none';
+  document.getElementById('cdash').style.display = 'block';
+
+  const total   = rows.reduce((s,r) => s + num(r, C.warehouse), 0);
+  const totalVal= rows.reduce((s,r) => s + num(r, C.warehouse) * num(r, C.price), 0);
+  const outCnt  = rows.filter(r => num(r, C.warehouse) === 0).length;
+  const lowCnt  = rows.filter(r => num(r, C.warehouse) > 0 && num(r, C.warehouse) <= 10).length;
+  const seasons = uniq(rows.map(r => str(r, C.season)).filter(Boolean));
+  const totalWait = rows.reduce((s,r) => s + num(r, C.waiting), 0);
+
+  document.getElementById('kpi2').innerHTML = kpiHTML([
+    { label:'총 재고', val: total.toLocaleString() + ' 개', sub: `${rows.length.toLocaleString()} SKU`, color: 'var(--accent)' },
+    { label:'재고 금액', val: '₩' + Math.round(totalVal/10000).toLocaleString() + '만', color: 'var(--green)' },
+    { label:'시즌 수', val: seasons.length + ' 개', sub: seasons.join(' / '), color: 'var(--orange)' },
+    { label:'대기 재고', val: totalWait.toLocaleString() + ' 개', color: '#4fc3f7' },
+    { label:'재고 부족', val: lowCnt + ' 개', sub: `품절 ${outCnt}개`, color: 'var(--red)' },
+  ]);
+
+  // Donut charts
+  const catMap    = groupSum(rows, r => str(r,C.cat) || '기타', r => num(r,C.warehouse));
+  const seasonMap = groupSum(rows, r => str(r,C.season) || '기타', r => num(r,C.warehouse));
+  const subMap    = groupSum(rows, r => str(r,C.subcat) || '기타', r => num(r,C.warehouse));
+
+  ['d-cat','d-season','d-sub'].forEach(id => destroyChart(id));
+  charts['d-cat']    = donut('d-cat', catMap);
+  charts['d-season'] = donut('d-season', seasonMap);
+  charts['d-sub']    = donut('d-sub', subMap);
+
+  // Total trend
+  if (dates.length) {
+    const labels = dates.map(d => d.label);
+    const data   = dates.map(d => rows.reduce((s,r) => s + num(r, d.colIdx), 0));
+    destroyChart('d-trend');
+    charts['d-trend'] = new Chart(document.getElementById('d-trend'), {
+      type: 'line',
+      data: { labels, datasets: [{
+        label: '전체 재고', data, borderColor: '#6c63ff',
+        backgroundColor: 'rgba(108,99,255,.08)', fill: true, tension: 0.4, pointRadius: 4,
+      }]},
+      options: lineOpts('재고 합계 (개)')
+    });
+  }
+
+  // Low stock table
+  const lowRows = rows
+    .filter(r => num(r, C.warehouse) <= 10)
+    .sort((a,b) => num(a, C.warehouse) - num(b, C.warehouse))
+    .slice(0, 40);
+  document.getElementById('lowTbl').innerHTML = lowRows.map(r => {
+    const wh = num(r, C.warehouse);
+    const color = wh === 0 ? 'var(--red)' : 'var(--yellow)';
+    return `<tr>
+      <td>${str(r,C.name)}</td>
+      <td>${str(r,C.season)}</td>
+      <td>${str(r,C.size)}</td>
+      <td style="text-align:right;font-weight:700;color:${color}">${wh}</td>
+      <td style="text-align:right">${num(r,C.waiting).toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+
+  // Size bars (apparel only)
+  const STD_SIZES2 = ['XS','S','M','L','XL','XXL','FREE'];
+  const apparelRows2 = rows.filter(r => str(r, C.cat) === '어패럴');
+  const sizeMap2 = groupSum(apparelRows2, r => {
+    const sz = str(r, C.size).toUpperCase();
+    return STD_SIZES2.includes(sz) ? sz : '기타';
+  }, r => num(r, C.warehouse));
+  const sizeOrder2 = [...STD_SIZES2, '기타'];
+  const szKeys2 = Object.keys(sizeMap2).sort((a,b) => {
+    const ai = sizeOrder2.indexOf(a), bi = sizeOrder2.indexOf(b);
+    return (ai<0?99:ai) - (bi<0?99:bi);
+  });
+  const szMax2 = Math.max(...Object.values(sizeMap2), 1);
+  const sizeMap = sizeMap2; const szKeys = szKeys2; const szMax = szMax2;
+  document.getElementById('d-size').innerHTML =
+    '<div class="bar-list">' +
+    szKeys.map(k => `<div class="bar-row">
+      <div class="bar-key">${k}</div>
+      <div class="bar-bg"><div class="bar-fill" style="width:${Math.round(sizeMap[k]/szMax*100)}%"></div></div>
+      <div class="bar-val">${sizeMap[k].toLocaleString()}</div>
+    </div>`).join('') +
+    '</div>';
+}
+
+// ─── Helpers ─────────────────────────────────────────────
+function kpiHTML(items) {
+  return items.map(it => `
+    <div class="kpi" style="--kpi-color:${it.color}">
+      <div class="kpi-label">${it.label}</div>
+      <div class="kpi-val">${it.val}</div>
+      ${it.sub ? `<div class="kpi-sub">${it.sub}</div>` : ''}
+    </div>`).join('');
+}
+
+function groupSum(data, keyFn, valFn) {
+  return data.reduce((acc, r) => {
+    const k = keyFn(r); acc[k] = (acc[k]||0) + valFn(r); return acc;
+  }, {});
+}
+
+function uniq(arr) { return [...new Set(arr)]; }
+
+function paletteAlpha(n, a) {
+  return Array.from({length: n}, (_,i) => PALETTE[i%PALETTE.length] + (a === '.8' ? 'cc' : ''));
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function donut(id, map) {
+  return new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(map),
+      datasets: [{ data: Object.values(map), backgroundColor: paletteAlpha(Object.keys(map).length, '1'), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, cutout: '62%',
+      plugins: { legend: { position: 'bottom', labels: { color: '#777788', boxWidth: 11, font: { size: 11 }, padding: 10 } } }
+    }
+  });
+}
+
+const baseScaleOpts = {
+  x: { ticks: { color: '#777788', maxRotation: 45 }, grid: { color: '#2e2e3e' } },
+  y: { ticks: { color: '#777788' }, grid: { color: '#2e2e3e' } }
+};
+
+function barOpts() {
+  return { responsive: true, maintainAspectRatio: true,
+    plugins: { legend: { display: false } },
+    scales: baseScaleOpts };
+}
+
+function lineOpts(ylabel) {
+  return {
+    responsive: true, maintainAspectRatio: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { labels: { color: '#777788', font: { size: 12 } } } },
+    scales: {
+      x: baseScaleOpts.x,
+      y: { ...baseScaleOpts.y, title: { display: true, text: ylabel, color: '#777788', font: { size: 11 } } }
+    }
+  };
+}
+
+// ─── Tab switching ────────────────────────────────────────
+const rendered = {};
+function switchTab(name, el) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.getElementById('v-' + name).classList.add('on');
+  el.classList.add('on');
+  // Re-render charts for tabs that were hidden during init
+  if (rows.length && !rendered[name]) {
+    rendered[name] = true;
+    if (name === 'dash')  renderDash();
+    if (name === 'trend') renderTrend();
+  }
+  // Resize all charts in this view
+  Object.values(charts).forEach(c => { try { c.resize(); } catch(e){} });
+}
+
+// ─── Start ───────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
