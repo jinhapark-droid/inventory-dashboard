@@ -120,7 +120,10 @@ tbody tr:hover { background: var(--surface2); }
     <span class="badge">25FW · 25SS</span>
   </div>
   <div class="hdr-right">
-    <span class="ts" id="ts">로딩 중...</span>
+    <div style="text-align:right;line-height:1.6">
+      <div style="font-size:12px;color:var(--muted)" id="ts">로딩 중...</div>
+      <div style="font-size:12px;color:var(--muted)" id="nextUpdate"></div>
+    </div>
     <button class="btn" onclick="init()">↻ 새로고침</button>
   </div>
 </div>
@@ -231,6 +234,27 @@ tbody tr:hover { background: var(--surface2); }
           <div class="card" id="d-size" style="display:flex;flex-direction:column;justify-content:center;min-height:240px"></div>
         </div>
       </div>
+
+      <div class="sec">
+        <div class="sec-hdr">
+          <span class="sec-title">소진속도 Top 5</span>
+          <div class="tgl">
+            <button class="tgl-btn on" onclick="setVeloMode('daily',this)">일별</button>
+            <button class="tgl-btn"    onclick="setVeloMode('weekly',this)">주간</button>
+          </div>
+        </div>
+        <div class="g2">
+          <div class="card"><canvas id="veloChart" style="max-height:280px"></canvas></div>
+          <div class="tbl-wrap">
+            <table><thead><tr>
+              <th>순위</th><th>상품명</th><th>시즌</th><th>사이즈</th>
+              <th style="text-align:right" id="veloUnit">일 평균 소진</th>
+              <th style="text-align:right">현재 재고</th>
+              <th style="text-align:right">예상 소진일</th>
+            </tr></thead><tbody id="veloTbl"></tbody></table>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -280,7 +304,17 @@ async function init() {
     rendered['summary'] = true;
     renderSummary();
     // Trend and dash are rendered lazily when their tab is first clicked
-    document.getElementById('ts').textContent = '최종 업데이트: ' + new Date().toLocaleString('ko-KR');
+    const now = new Date();
+    document.getElementById('ts').textContent = '최종 업데이트: ' + now.toLocaleString('ko-KR');
+    const next = new Date(now);
+    next.setHours(19, 0, 0, 0);
+    if (now >= next) next.setDate(next.getDate() + 1);
+    const diff = next - now;
+    const hh = Math.floor(diff / 3600000);
+    const mm = Math.floor((diff % 3600000) / 60000);
+    const nextLabel = next.getDate() === now.getDate() ? '오늘' : '내일';
+    document.getElementById('nextUpdate').textContent =
+      `다음 업데이트: ${nextLabel} 오후 7:00 (${hh}시간 ${mm}분 후)`;
   } catch(e) {
     ['lsummary','ltrend','ldash'].forEach(id => {
       document.getElementById(id).innerHTML = `<div class="err">❌ 데이터 로드 실패<br><small>${e.message}</small></div>`;
@@ -597,6 +631,8 @@ function renderDash() {
       <div class="bar-val">${sizeMap[k].toLocaleString()}</div>
     </div>`).join('') +
     '</div>';
+
+  drawVelo();
 }
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -660,6 +696,91 @@ function lineOpts(ylabel) {
       y: { ...baseScaleOpts.y, title: { display: true, text: ylabel, color: '#777788', font: { size: 11 } } }
     }
   };
+}
+
+// ─── 소진속도 ─────────────────────────────────────────────
+let veloMode = 'daily';
+
+function setVeloMode(mode, el) {
+  veloMode = mode;
+  document.querySelectorAll('.tgl-btn').forEach(b => {
+    if (b.textContent === '일별' || b.textContent === '주간') b.classList.remove('on');
+  });
+  el.classList.add('on');
+  drawVelo();
+}
+
+function drawVelo() {
+  if (!dates.length) return;
+  const days = dates.length - 1; // 14일
+  const divisor = veloMode === 'daily' ? days : (days / 7);
+  const unit = veloMode === 'daily' ? '일 평균 소진 (개)' : '주 평균 소진 (개)';
+  document.getElementById('veloUnit').textContent = unit;
+
+  // 소진속도 = (첫날 재고 - 마지막날 재고) / 기간
+  const firstCol = dates[0].colIdx;
+  const lastCol  = dates[dates.length - 1].colIdx;
+
+  const velocities = rows
+    .map(r => {
+      const first = num(r, firstCol);
+      const last  = num(r, lastCol);
+      const consumed = first - last;
+      if (consumed <= 0 || first === 0) return null;
+      return {
+        name:     str(r, C.name),
+        season:   str(r, C.season),
+        size:     str(r, C.size),
+        stock:    num(r, C.warehouse),
+        velocity: consumed / divisor,
+        consumed,
+        daysLeft: consumed > 0 ? Math.round(last / (consumed / days)) : null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.velocity - a.velocity)
+    .slice(0, 5);
+
+  // 차트
+  destroyChart('veloChart');
+  charts.veloChart = new Chart(document.getElementById('veloChart'), {
+    type: 'bar',
+    data: {
+      labels: velocities.map(v => v.name.replace(/\[.*?\]\s?/, '').slice(0, 20)),
+      datasets: [{
+        label: unit,
+        data: velocities.map(v => +v.velocity.toFixed(1)),
+        backgroundColor: velocities.map((_, i) => PALETTE[i] + 'cc'),
+        borderRadius: 6, borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#777788' }, grid: { color: '#2e2e3e' } },
+        y: { ticks: { color: '#e8e8f0', font: { size: 11 } }, grid: { color: '#2e2e3e' } }
+      }
+    }
+  });
+
+  // 테이블
+  const medals = ['🥇','🥈','🥉','4','5'];
+  document.getElementById('veloTbl').innerHTML = velocities.map((v, i) => {
+    const daysLeftStr = v.daysLeft !== null && v.daysLeft > 0 && v.stock > 0
+      ? `${v.daysLeft}일`
+      : v.stock === 0 ? '<span style="color:var(--red)">품절</span>' : '-';
+    return `<tr>
+      <td style="text-align:center;font-size:15px">${medals[i]}</td>
+      <td>${v.name.replace(/\[.*?\]\s?/, '')}</td>
+      <td>${v.season}</td>
+      <td>${v.size}</td>
+      <td style="text-align:right;font-weight:700;color:var(--accent)">${v.velocity.toFixed(1)}</td>
+      <td style="text-align:right">${v.stock.toLocaleString()}</td>
+      <td style="text-align:right">${daysLeftStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ─── Tab switching ────────────────────────────────────────
