@@ -870,17 +870,21 @@ let searchQuery = '';
 
 function onSearch(q) {
   searchQuery = q.trim().toLowerCase();
-  // 재고 현황 요약 탭이면 즉시 테이블 갱신
-  if (document.getElementById('v-summary').classList.contains('on')) {
-    drawTable();
-  }
-  // 어느 탭이든 검색어 있으면 요약 탭으로 이동
+
+  // 요약 탭으로 전환
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.getElementById('v-summary').classList.add('on');
+  document.querySelectorAll('.tab')[0].classList.add('on');
+
+  drawTable();
+
+  // 검색어 있으면 결과 테이블로 스크롤
   if (searchQuery) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
-    document.getElementById('v-summary').classList.add('on');
-    document.querySelectorAll('.tab')[0].classList.add('on');
-    drawTable();
+    setTimeout(() => {
+      const tbl = document.querySelector('.tbl-wrap');
+      if (tbl) tbl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
   }
 }
 
