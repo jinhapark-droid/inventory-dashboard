@@ -25,9 +25,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 /* ── Header ── */
 .header {
   background: var(--surface); border-bottom: 1px solid var(--border);
-  padding: 14px 28px; display: flex; align-items: center; justify-content: space-between;
-  position: sticky; top: 0; z-index: 200;
+  padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+  position: sticky; top: 0; z-index: 200; flex-wrap: nowrap;
 }
+.header-brand { display: flex; align-items: center; flex-shrink: 0; }
+.header-search { flex: 1; min-width: 0; }
+.header-meta { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .logo { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
 .badge { background: var(--accent); color: #fff; border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; margin-left: 10px; }
 .hdr-right { display: flex; align-items: center; gap: 12px; }
@@ -106,6 +109,19 @@ tbody tr:hover { background: var(--surface2); }
 .bar-fill { height: 100%; border-radius: 5px; background: var(--accent); transition: width .5s; }
 .bar-val { width: 56px; font-size: 12px; text-align: right; }
 
+/* ── Search ── */
+.search-wrap { position: relative; }
+.search-input {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 60px 7px 36px; border-radius: 8px; font-size: 13px; outline: none;
+  width: 100%; transition: border-color .15s;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--muted); }
+.search-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; pointer-events: none; }
+.search-count { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); }
+mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px; padding: 0 1px; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -115,14 +131,21 @@ tbody tr:hover { background: var(--surface2); }
 <body>
 
 <div class="header">
-  <div style="display:flex;align-items:center">
+  <div class="header-brand">
     <span class="logo">URBAN SIDE</span>
     <span class="badge">25FW · 25SS</span>
   </div>
-  <div class="hdr-right">
-    <div style="text-align:right;line-height:1.6">
-      <div style="font-size:12px;color:var(--muted)" id="ts">로딩 중...</div>
-      <div style="font-size:12px;color:var(--muted)" id="nextUpdate"></div>
+  <div class="header-search">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" id="searchInput" type="text" placeholder="상품명, 카테고리, 시즌 검색..." oninput="onSearch(this.value)" style="width:100%">
+      <span class="search-count" id="searchCount"></span>
+    </div>
+  </div>
+  <div class="header-meta">
+    <div style="line-height:1.6;text-align:right">
+      <div style="font-size:12px;color:var(--muted);white-space:nowrap" id="ts">로딩 중...</div>
+      <div style="font-size:12px;color:var(--muted);white-space:nowrap" id="nextUpdate"></div>
     </div>
     <button class="btn" onclick="init()">↻ 새로고침</button>
   </div>
@@ -425,11 +448,21 @@ function renderSummary() {
 function drawTable() {
   const fSeason = document.getElementById('selSeason').value;
   const fCat    = document.getElementById('selCat').value;
-  const data = rows.filter(r =>
-    (!fSeason || str(r, C.season) === fSeason) &&
-    (!fCat    || str(r, C.cat)    === fCat)
-  );
-  document.getElementById('tbody1').innerHTML = data.slice(0,300).map(r => {
+  const q       = searchQuery;
+
+  const data = rows.filter(r => {
+    if (fSeason && str(r, C.season) !== fSeason) return false;
+    if (fCat    && str(r, C.cat)    !== fCat)    return false;
+    if (q) {
+      const haystack = [str(r,C.name), str(r,C.season), str(r,C.cat), str(r,C.subcat), str(r,C.size)].join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('searchCount').textContent = q ? `${data.length}건` : '';
+
+  document.getElementById('tbody1').innerHTML = data.slice(0, 300).map(r => {
     const wh = num(r, C.warehouse), wt = num(r, C.waiting), ins = num(r, C.insurance);
     const pill = wh === 0
       ? '<span class="pill pill-out">품절</span>'
@@ -437,10 +470,10 @@ function drawTable() {
         ? '<span class="pill pill-low">부족</span>'
         : '<span class="pill pill-ok">정상</span>';
     return `<tr>
-      <td>${str(r,C.name)}</td>
-      <td>${str(r,C.season)}</td>
-      <td>${str(r,C.cat)}</td>
-      <td>${str(r,C.size)}</td>
+      <td>${highlight(str(r,C.name), q)}</td>
+      <td>${highlight(str(r,C.season), q)}</td>
+      <td>${highlight(str(r,C.cat), q)}</td>
+      <td>${highlight(str(r,C.size), q)}</td>
       <td style="text-align:right;font-weight:600">${wh.toLocaleString()}</td>
       <td style="text-align:right">${wt.toLocaleString()}</td>
       <td style="text-align:right">${ins.toLocaleString()}</td>
@@ -830,6 +863,31 @@ function drawVelo() {
       </tr>`;
     }).join('');
   }
+}
+
+// ─── 검색 ────────────────────────────────────────────────
+let searchQuery = '';
+
+function onSearch(q) {
+  searchQuery = q.trim().toLowerCase();
+  // 재고 현황 요약 탭이면 즉시 테이블 갱신
+  if (document.getElementById('v-summary').classList.contains('on')) {
+    drawTable();
+  }
+  // 어느 탭이든 검색어 있으면 요약 탭으로 이동
+  if (searchQuery) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+    document.getElementById('v-summary').classList.add('on');
+    document.querySelectorAll('.tab')[0].classList.add('on');
+    drawTable();
+  }
+}
+
+function highlight(text, q) {
+  if (!q) return text;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(escaped, 'gi'), m => `<mark>${m}</mark>`);
 }
 
 // ─── Tab switching ────────────────────────────────────────
