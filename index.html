@@ -317,8 +317,9 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
 
 <script>
 // ─── Constants ───────────────────────────────────────────
-const SHEET = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0';
-const GID   = '1461767551';
+const SHEET  = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0';
+const GID    = '1461767551';
+const GID2   = '1388188128'; // 소진율 시트 (생산수량/잔여/소진율)
 
 // Confirmed column indices from data inspection
 const C = {
@@ -350,6 +351,7 @@ let rows  = [];          // data rows (each is an array)
 let dates = [];          // [{serial, label}] for date columns
 let charts = {};
 let trendMode = 'product';
+let apparelMeta = {};    // SKU코드 → {total, orders, remaining, rate, line, season, name}
 
 // ─── Init ─────────────────────────────────────────────────
 async function init() {
@@ -378,18 +380,19 @@ async function init() {
 }
 
 async function fetchData() {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:json&gid=${GID}`;
-  const res  = await fetch(url);
-  const text = await res.text();
-  const json = JSON.parse(text.replace(/^[^(]+\(/, '').replace(/\);?\s*$/, ''));
+  const [mainRes, metaRes] = await Promise.all([
+    fetch(`https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:json&gid=${GID}`),
+    fetch(`https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:json&gid=${GID2}`),
+  ]);
 
-  const allRows = json.table.rows;
-  // Row 0 = header, skip it; remaining = data
+  // ── 메인 시트 ──
+  const mainText = await mainRes.text();
+  const mainJson = JSON.parse(mainText.replace(/^[^(]+\(/, '').replace(/\);?\s*$/, ''));
+  const allRows  = mainJson.table.rows;
   rows = allRows.slice(1)
     .map(r => (r.c || []).map(c => (c && c.v !== null && c.v !== undefined) ? c.v : ''))
     .filter(r => String(r[0] || '').trim() !== '');
 
-  // Build date labels from header row (row 0), cols 18-32
   const hdr = allRows[0].c;
   dates = [];
   for (let i = C.dateStart; i <= C.dateEnd; i++) {
@@ -399,6 +402,27 @@ async function fetchData() {
     if (typeof serial !== 'number') continue;
     dates.push({ serial, label: excelDateToLabel(serial), colIdx: i });
   }
+
+  // ── 소진율 시트 (GID2) ── 상품명을 키로 사용
+  const metaText = await metaRes.text();
+  const metaJson = JSON.parse(metaText.replace(/^[^(]+\(/, '').replace(/\);?\s*$/, ''));
+  apparelMeta = {};
+  metaJson.table.rows.forEach(row => {
+    const c    = (row.c || []).map(cell => (cell && cell.v != null) ? cell.v : '');
+    const name = String(c[0] || '').trim();
+    if (!name) return;
+    apparelMeta[name] = {
+      name,
+      season:    String(c[2] || '').trim(),
+      line:      String(c[3] || '').trim(),
+      total:     parseFloat(c[5]) || 0,   // F: 생산 수량
+      orders:    parseFloat(c[6]) || 0,   // G: 판매 주문
+      remaining: parseFloat(c[7]) || 0,   // H: 잔여 수량
+      rate:      parseFloat(c[8]) || 0,   // I: 소진율 (0~1)
+      exchanges: parseFloat(c[9]) || 0,
+      returns:   parseFloat(c[10]) || 0,
+    };
+  });
 }
 
 // Excel serial → "M/D" label
@@ -959,38 +983,55 @@ function colorDot(color) {
   return `<span class="color-dot" style="background:${bg}"></span>`;
 }
 
+// 상품코드에서 사이즈 접미사 제거 → 컬러 레벨 코드
+function codeBase(code) {
+  return code.replace(/-(?:XS|S|M|L|XL|XXL|FREE|OS|ONE)$/i, '').trim();
+}
+
+// 소진율 색상
+function rateBadge(rate) {
+  const pct = Math.round(rate * 100);
+  const color = pct >= 80 ? 'var(--red)' : pct >= 50 ? 'var(--orange)' : pct >= 30 ? 'var(--yellow)' : 'var(--green)';
+  const bg    = pct >= 80 ? 'rgba(255,77,109,.15)' : pct >= 50 ? 'rgba(247,151,30,.13)' : pct >= 30 ? 'rgba(255,209,102,.12)' : 'rgba(67,233,123,.12)';
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:5px;font-size:11px;font-weight:700;color:${color};background:${bg}">${pct}%</span>`;
+}
+
 function drawApparelMatrix() {
   const fSeason = document.getElementById('matrixSeason').value;
   const fLine   = document.getElementById('matrixLine').value;
 
-  const apparel = rows.filter(r => str(r, C.cat) === '어패럴');
+  // ── 소진율 시트 기반으로 품목 목록 구성 ──
+  // apparelMeta에 있는 모든 항목을 어패럴로 처리 (다이니마 백팩 등 포함)
+  let metaEntries = Object.entries(apparelMeta);
+  if (fSeason) metaEntries = metaEntries.filter(([, m]) => m.season === fSeason);
+  if (fLine)   metaEntries = metaEntries.filter(([, m]) => m.line   === fLine);
 
-  // filters
-  const filtered = apparel.filter(r => {
-    if (fSeason && str(r, C.season) !== fSeason) return false;
-    if (fLine   && str(r, C.line)   !== fLine)   return false;
-    return true;
+  // ── 원 시트에서 사이즈별 창고 재고 집계 (상품명 기준) ──
+  // 시즌 prefix [XX] 있는 모든 행 포함 (카테고리 무관)
+  const sizeStock = {}; // 상품명 → { XS:0, S:0, … }
+  rows.forEach(r => {
+    const name = str(r, C.name);
+    if (!name.match(/^\[/)) return; // 시즌 태그 없으면 제외
+    const sz = str(r, C.size).toUpperCase();
+    const wh = num(r, C.warehouse);
+    if (!sizeStock[name]) sizeStock[name] = {};
+    sizeStock[name][sz] = (sizeStock[name][sz] || 0) + wh;
   });
 
-  // Build: lineMap[line][color][size] = stock
-  const lineMap = {};
-  filtered.forEach(r => {
-    const line  = str(r, C.line)  || '기타';
-    const color = extractColor(str(r, C.name), str(r, C.line));
-    const sz    = str(r, C.size).toUpperCase();
-    const wh    = num(r, C.warehouse);
-    const size  = STD_SIZES_M.includes(sz) ? sz : '기타';
-    if (!lineMap[line]) lineMap[line] = {};
-    if (!lineMap[line][color]) lineMap[line][color] = {};
-    lineMap[line][color][size] = (lineMap[line][color][size] || 0) + wh;
+  // ── 라인별 그룹화 ──
+  const lineMap = {}; // line → [{ name, meta, sizes }]
+  metaEntries.forEach(([name, meta]) => {
+    const line = meta.line || '기타';
+    if (!lineMap[line]) lineMap[line] = [];
+    lineMap[line].push({ name, meta, sizes: sizeStock[name] || {} });
   });
 
-  // Determine which size columns actually appear
-  const usedSizes = STD_SIZES_M.filter(sz =>
-    filtered.some(r => str(r, C.size).toUpperCase() === sz)
-  );
-  const hasEtc = filtered.some(r => !STD_SIZES_M.includes(str(r, C.size).toUpperCase()));
-  const sizeCols = [...usedSizes, ...(hasEtc ? ['기타'] : [])];
+  // 사용된 사이즈 컬럼 결정 (STD 순 + 기타)
+  const allSzKeys = new Set();
+  Object.values(sizeStock).forEach(sz => Object.keys(sz).forEach(k => allSzKeys.add(k)));
+  const sizeCols = STD_SIZES_M.filter(s => allSzKeys.has(s));
+  const hasEtc   = [...allSzKeys].some(k => !STD_SIZES_M.includes(k));
+  if (hasEtc) sizeCols.push('기타');
 
   function mcel(val) {
     if (val === undefined || val === null) return `<td class="mcel mcel-na">—</td>`;
@@ -1000,69 +1041,96 @@ function drawApparelMatrix() {
   }
 
   const lines = Object.keys(lineMap).sort();
+  const numSz = sizeCols.length;
+  // 총 컬럼: 품목/컬러 | 총수량 | 잔여(소진율) | [sizes] | 창고소계
   let html = `<table class="matrix-table">
     <thead><tr>
       <th class="line-col">품목 / 컬러</th>
+      <th style="text-align:center">총수량</th>
+      <th style="text-align:center">잔여(소진율)</th>
       ${sizeCols.map(s=>`<th>${s}</th>`).join('')}
-      <th>합계</th>
+      <th style="text-align:right">창고소계</th>
     </tr></thead><tbody>`;
 
-  lines.forEach((line, li) => {
-    const colors = Object.keys(lineMap[line]).sort();
-    // line total row first
-    const lineTotals = {};
-    let lineGrandTotal = 0;
-    colors.forEach(color => {
+  lines.forEach(line => {
+    const items = lineMap[line];
+    const colorCount = items.length;
+
+    // 라인 합계
+    const lineTotalProd = items.reduce((s, it) => s + it.meta.total, 0);
+    const lineTotalRem  = items.reduce((s, it) => s + it.meta.remaining, 0);
+    const lineRate       = lineTotalProd > 0 ? (lineTotalProd - lineTotalRem) / lineTotalProd : 0;
+    const lineSzTotals  = {};
+    items.forEach(it => {
       sizeCols.forEach(sz => {
-        const v = lineMap[line][color][sz] || 0;
-        lineTotals[sz] = (lineTotals[sz] || 0) + v;
-        lineGrandTotal += v;
+        const v = sz === '기타'
+          ? Object.entries(it.sizes).filter(([k]) => !STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
+          : (it.sizes[sz] || 0);
+        lineSzTotals[sz] = (lineSzTotals[sz] || 0) + v;
       });
     });
+    const lineWhTotal = sizeCols.reduce((s,sz) => s + (lineSzTotals[sz]||0), 0);
 
-    // Line header row
+    // 라인 헤더
     html += `<tr class="m-group">
-      <td class="line-name" colspan="${sizeCols.length + 2}" style="padding:10px 14px;font-size:13px;color:var(--text)">
+      <td class="line-name" colspan="${numSz + 4}" style="padding:10px 14px;font-size:13px;color:var(--text)">
         ${line}
-        <span style="color:var(--muted);font-weight:400;font-size:11px;margin-left:8px">${colors.length}컬러</span>
+        <span style="color:var(--muted);font-weight:400;font-size:11px;margin-left:8px">${colorCount}컬러</span>
       </td>
     </tr>`;
 
-    // Per-color rows
-    colors.forEach(color => {
-      const sizes = lineMap[line][color];
-      const total = sizeCols.reduce((s,sz) => s + (sizes[sz]||0), 0);
-      if (total === 0 && !fLine) return; // 재고 0인 컬러는 전체뷰에서 숨김
+    // 컬러별 행
+    items.sort((a,b) => a.name.localeCompare(b.name)).forEach(it => {
+      const color   = extractColor(it.meta.name, it.meta.line);
+      const whTotal = sizeCols.reduce((s,sz) => {
+        const v = sz === '기타'
+          ? Object.entries(it.sizes).filter(([k]) => !STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
+          : (it.sizes[sz] || 0);
+        return s + v;
+      }, 0);
       html += `<tr>
         <td class="color-name">${colorDot(color)}${color}</td>
-        ${sizeCols.map(sz => mcel(sizes[sz])).join('')}
-        <td style="text-align:right;font-weight:600;font-size:12px">${total.toLocaleString()}</td>
+        <td style="text-align:center;font-size:12px;color:var(--muted)">${it.meta.total.toLocaleString()}</td>
+        <td style="text-align:center">${it.meta.total > 0 ? rateBadge(it.meta.rate) : '<span style="color:var(--muted)">—</span>'}</td>
+        ${sizeCols.map(sz => {
+          const v = sz === '기타'
+            ? Object.entries(it.sizes).filter(([k]) => !STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
+            : (it.sizes[sz]);
+          return mcel(v);
+        }).join('')}
+        <td style="text-align:right;font-weight:600;font-size:12px">${whTotal.toLocaleString()}</td>
       </tr>`;
     });
 
-    // Line total row
+    // 라인 소계
     html += `<tr class="matrix-totrow">
       <td style="padding-left:14px;font-size:12px;position:sticky;left:0;background:var(--surface)">소계</td>
-      ${sizeCols.map(sz => `<td class="mcel" style="text-align:center">${(lineTotals[sz]||0).toLocaleString()}</td>`).join('')}
-      <td style="text-align:right">${lineGrandTotal.toLocaleString()}</td>
+      <td style="text-align:center;font-size:12px">${lineTotalProd.toLocaleString()}</td>
+      <td style="text-align:center">${rateBadge(lineRate)}</td>
+      ${sizeCols.map(sz=>`<td class="mcel" style="text-align:center">${(lineSzTotals[sz]||0).toLocaleString()}</td>`).join('')}
+      <td style="text-align:right">${lineWhTotal.toLocaleString()}</td>
     </tr>`;
   });
 
-  // Grand total row
+  // 전체 합계
   if (lines.length > 1) {
-    const grandTotals = {};
-    let grandTotal = 0;
-    filtered.forEach(r => {
-      const sz = STD_SIZES_M.includes(str(r,C.size).toUpperCase()) ? str(r,C.size).toUpperCase() : '기타';
-      if (!sizeCols.includes(sz)) return;
-      const v = num(r, C.warehouse);
-      grandTotals[sz] = (grandTotals[sz]||0) + v;
-      grandTotal += v;
-    });
+    const gtProd = metaEntries.reduce((s,[,m]) => s+m.total, 0);
+    const gtRem  = metaEntries.reduce((s,[,m]) => s+m.remaining, 0);
+    const gtRate = gtProd > 0 ? (gtProd - gtRem) / gtProd : 0;
+    const gtSz   = {};
+    Object.values(sizeStock).forEach(sz => sizeCols.forEach(col => {
+      const v = col === '기타'
+        ? Object.entries(sz).filter(([k])=>!STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
+        : (sz[col]||0);
+      gtSz[col] = (gtSz[col]||0) + v;
+    }));
+    const gtWh = sizeCols.reduce((s,sz) => s+(gtSz[sz]||0), 0);
     html += `<tr style="background:var(--surface2);font-weight:700;border-top:2px solid var(--accent)">
       <td style="padding:10px 14px;position:sticky;left:0;background:var(--surface2);color:var(--accent)">전체 합계</td>
-      ${sizeCols.map(sz=>`<td class="mcel" style="text-align:center;color:var(--accent)">${(grandTotals[sz]||0).toLocaleString()}</td>`).join('')}
-      <td style="text-align:right;color:var(--accent)">${grandTotal.toLocaleString()}</td>
+      <td style="text-align:center;color:var(--accent)">${gtProd.toLocaleString()}</td>
+      <td style="text-align:center">${rateBadge(gtRate)}</td>
+      ${sizeCols.map(sz=>`<td class="mcel" style="text-align:center;color:var(--accent)">${(gtSz[sz]||0).toLocaleString()}</td>`).join('')}
+      <td style="text-align:right;color:var(--accent)">${gtWh.toLocaleString()}</td>
     </tr>`;
   }
 
@@ -1071,9 +1139,9 @@ function drawApparelMatrix() {
 }
 
 function initApparelMatrixFilters() {
-  const apparel = rows.filter(r => str(r, C.cat) === '어패럴');
-  const seasons = uniq(apparel.map(r => str(r, C.season))).sort();
-  const lines   = uniq(apparel.map(r => str(r, C.line)).filter(Boolean)).sort();
+  const metas = Object.values(apparelMeta);
+  const seasons = uniq(metas.map(m => m.season).filter(Boolean)).sort();
+  const lines   = uniq(metas.map(m => m.line).filter(Boolean)).sort();
   document.getElementById('matrixSeason').innerHTML =
     '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
   document.getElementById('matrixLine').innerHTML =
