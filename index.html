@@ -126,6 +126,28 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Apparel Matrix ── */
+.matrix-wrap { overflow-x: auto; }
+.matrix-table { border-collapse: collapse; font-size: 12px; min-width: 500px; }
+.matrix-table th {
+  padding: 7px 10px; background: var(--surface2);
+  color: var(--muted); font-size: 11px; font-weight: 600;
+  text-align: center; white-space: nowrap;
+  position: sticky; top: 0; z-index: 5;
+}
+.matrix-table th.line-col { text-align: left; min-width: 180px; position: sticky; left: 0; z-index: 6; background: var(--surface2); }
+.matrix-table td { padding: 6px 10px; border-top: 1px solid var(--border); white-space: nowrap; }
+.matrix-table td.line-name { font-weight: 600; font-size: 12px; min-width: 180px; position: sticky; left: 0; background: var(--surface); z-index: 4; }
+.matrix-table td.color-name { color: var(--muted); font-size: 11px; padding-left: 16px; position: sticky; left: 0; background: var(--surface); z-index: 4; }
+.matrix-table .m-group td { background: var(--surface2); }
+.mcel { text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; border-radius: 5px; }
+.mcel-0   { color: var(--red);    background: rgba(255,77,109,.15); }
+.mcel-low { color: var(--yellow); background: rgba(255,209,102,.12); }
+.mcel-ok  { color: var(--green);  background: rgba(67,233,123,.12); }
+.mcel-na  { color: var(--border); }
+.matrix-totrow td { font-weight: 700; border-top: 2px solid var(--border); color: var(--accent); }
+.color-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -174,6 +196,20 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
           <div class="card" id="sizeCard" style="display:flex;flex-direction:column;justify-content:center;min-height:260px"></div>
         </div>
       </div>
+      <!-- 어패럴 컬러×사이즈 매트릭스 -->
+      <div class="sec" id="apparelMatrixSec">
+        <div class="sec-hdr">
+          <span class="sec-title">어패럴 잔여 재고 — 컬러 × 사이즈</span>
+          <div class="controls">
+            <select id="matrixSeason" onchange="drawApparelMatrix()"><option value="">전체 시즌</option></select>
+            <select id="matrixLine" onchange="drawApparelMatrix()"><option value="">전체 품목</option></select>
+          </div>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="matrix-wrap" id="apparelMatrix" style="max-height:520px;overflow:auto"></div>
+        </div>
+      </div>
+
       <div class="sec">
         <div class="sec-hdr">
           <span class="sec-title">품목별 재고 상세</span>
@@ -442,6 +478,7 @@ function renderSummary() {
   s1.innerHTML = '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
   s2.innerHTML = '<option value="">전체 카테고리</option>' + cats.map(c=>`<option>${c}</option>`).join('');
 
+  initApparelMatrixFilters();
   drawTable();
 }
 
@@ -895,6 +932,153 @@ function drawVelo() {
       </tr>${drillRows(v.cat, color)}`;
     }).join('');
   }
+}
+
+// ─── 어패럴 컬러×사이즈 매트릭스 ────────────────────────
+const STD_SIZES_M = ['XS','S','M','L','XL','XXL'];
+const COLOR_DOTS  = {
+  '블랙':'#222','화이트':'#eee','그레이':'#888','네이비':'#1a2660',
+  '브라운':'#7b5230','베이지':'#d4b896','카키':'#6b7c3d','그린':'#3c7a3c',
+  '블루':'#2255cc','레드':'#cc2222','옐로우':'#e0c020','크림':'#f5efda',
+  '차콜':'#444','아이보리':'#f0e8d0','버건디':'#7c1a2c','올리브':'#6b7038',
+  '핑크':'#e07090','오렌지':'#d46820','퍼플':'#6633aa','멀티':'linear-gradient(135deg,#f66,#6cf,#6f6)',
+};
+
+function extractColor(name, line) {
+  // 풀네임에서 라인명과 시즌 태그 제거 → 남은 부분이 컬러
+  let cleaned = name
+    .replace(/\[.*?\]\s?/g, '')
+    .replace('어반사이드', '')
+    .trim();
+  if (line) cleaned = cleaned.replace(line, '').trim();
+  return cleaned || '기타';
+}
+
+function colorDot(color) {
+  const bg = COLOR_DOTS[color] || 'var(--muted)';
+  return `<span class="color-dot" style="background:${bg}"></span>`;
+}
+
+function drawApparelMatrix() {
+  const fSeason = document.getElementById('matrixSeason').value;
+  const fLine   = document.getElementById('matrixLine').value;
+
+  const apparel = rows.filter(r => str(r, C.cat) === '어패럴');
+
+  // filters
+  const filtered = apparel.filter(r => {
+    if (fSeason && str(r, C.season) !== fSeason) return false;
+    if (fLine   && str(r, C.line)   !== fLine)   return false;
+    return true;
+  });
+
+  // Build: lineMap[line][color][size] = stock
+  const lineMap = {};
+  filtered.forEach(r => {
+    const line  = str(r, C.line)  || '기타';
+    const color = extractColor(str(r, C.name), str(r, C.line));
+    const sz    = str(r, C.size).toUpperCase();
+    const wh    = num(r, C.warehouse);
+    const size  = STD_SIZES_M.includes(sz) ? sz : '기타';
+    if (!lineMap[line]) lineMap[line] = {};
+    if (!lineMap[line][color]) lineMap[line][color] = {};
+    lineMap[line][color][size] = (lineMap[line][color][size] || 0) + wh;
+  });
+
+  // Determine which size columns actually appear
+  const usedSizes = STD_SIZES_M.filter(sz =>
+    filtered.some(r => str(r, C.size).toUpperCase() === sz)
+  );
+  const hasEtc = filtered.some(r => !STD_SIZES_M.includes(str(r, C.size).toUpperCase()));
+  const sizeCols = [...usedSizes, ...(hasEtc ? ['기타'] : [])];
+
+  function mcel(val) {
+    if (val === undefined || val === null) return `<td class="mcel mcel-na">—</td>`;
+    if (val === 0) return `<td class="mcel mcel-0">0</td>`;
+    if (val <= 10) return `<td class="mcel mcel-low">${val}</td>`;
+    return `<td class="mcel mcel-ok">${val.toLocaleString()}</td>`;
+  }
+
+  const lines = Object.keys(lineMap).sort();
+  let html = `<table class="matrix-table">
+    <thead><tr>
+      <th class="line-col">품목 / 컬러</th>
+      ${sizeCols.map(s=>`<th>${s}</th>`).join('')}
+      <th>합계</th>
+    </tr></thead><tbody>`;
+
+  lines.forEach((line, li) => {
+    const colors = Object.keys(lineMap[line]).sort();
+    // line total row first
+    const lineTotals = {};
+    let lineGrandTotal = 0;
+    colors.forEach(color => {
+      sizeCols.forEach(sz => {
+        const v = lineMap[line][color][sz] || 0;
+        lineTotals[sz] = (lineTotals[sz] || 0) + v;
+        lineGrandTotal += v;
+      });
+    });
+
+    // Line header row
+    html += `<tr class="m-group">
+      <td class="line-name" colspan="${sizeCols.length + 2}" style="padding:10px 14px;font-size:13px;color:var(--text)">
+        ${line}
+        <span style="color:var(--muted);font-weight:400;font-size:11px;margin-left:8px">${colors.length}컬러</span>
+      </td>
+    </tr>`;
+
+    // Per-color rows
+    colors.forEach(color => {
+      const sizes = lineMap[line][color];
+      const total = sizeCols.reduce((s,sz) => s + (sizes[sz]||0), 0);
+      if (total === 0 && !fLine) return; // 재고 0인 컬러는 전체뷰에서 숨김
+      html += `<tr>
+        <td class="color-name">${colorDot(color)}${color}</td>
+        ${sizeCols.map(sz => mcel(sizes[sz])).join('')}
+        <td style="text-align:right;font-weight:600;font-size:12px">${total.toLocaleString()}</td>
+      </tr>`;
+    });
+
+    // Line total row
+    html += `<tr class="matrix-totrow">
+      <td style="padding-left:14px;font-size:12px;position:sticky;left:0;background:var(--surface)">소계</td>
+      ${sizeCols.map(sz => `<td class="mcel" style="text-align:center">${(lineTotals[sz]||0).toLocaleString()}</td>`).join('')}
+      <td style="text-align:right">${lineGrandTotal.toLocaleString()}</td>
+    </tr>`;
+  });
+
+  // Grand total row
+  if (lines.length > 1) {
+    const grandTotals = {};
+    let grandTotal = 0;
+    filtered.forEach(r => {
+      const sz = STD_SIZES_M.includes(str(r,C.size).toUpperCase()) ? str(r,C.size).toUpperCase() : '기타';
+      if (!sizeCols.includes(sz)) return;
+      const v = num(r, C.warehouse);
+      grandTotals[sz] = (grandTotals[sz]||0) + v;
+      grandTotal += v;
+    });
+    html += `<tr style="background:var(--surface2);font-weight:700;border-top:2px solid var(--accent)">
+      <td style="padding:10px 14px;position:sticky;left:0;background:var(--surface2);color:var(--accent)">전체 합계</td>
+      ${sizeCols.map(sz=>`<td class="mcel" style="text-align:center;color:var(--accent)">${(grandTotals[sz]||0).toLocaleString()}</td>`).join('')}
+      <td style="text-align:right;color:var(--accent)">${grandTotal.toLocaleString()}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  document.getElementById('apparelMatrix').innerHTML = html;
+}
+
+function initApparelMatrixFilters() {
+  const apparel = rows.filter(r => str(r, C.cat) === '어패럴');
+  const seasons = uniq(apparel.map(r => str(r, C.season))).sort();
+  const lines   = uniq(apparel.map(r => str(r, C.line)).filter(Boolean)).sort();
+  document.getElementById('matrixSeason').innerHTML =
+    '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
+  document.getElementById('matrixLine').innerHTML =
+    '<option value="">전체 품목</option>' + lines.map(l=>`<option>${l}</option>`).join('');
+  drawApparelMatrix();
 }
 
 // ─── 검색 ────────────────────────────────────────────────
