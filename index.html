@@ -1056,11 +1056,8 @@ function drawApparelMatrix() {
     const items = lineMap[line];
     const colorCount = items.length;
 
-    // 라인 합계
-    const lineTotalProd = items.reduce((s, it) => s + it.meta.total, 0);
-    const lineTotalRem  = items.reduce((s, it) => s + it.meta.remaining, 0);
-    const lineRate       = lineTotalProd > 0 ? (lineTotalProd - lineTotalRem) / lineTotalProd : 0;
-    const lineSzTotals  = {};
+    // 라인 사이즈 합계 먼저 계산
+    const lineSzTotals = {};
     items.forEach(it => {
       sizeCols.forEach(sz => {
         const v = sz === '기타'
@@ -1069,7 +1066,10 @@ function drawApparelMatrix() {
         lineSzTotals[sz] = (lineSzTotals[sz] || 0) + v;
       });
     });
-    const lineWhTotal = sizeCols.reduce((s,sz) => s + (lineSzTotals[sz]||0), 0);
+    const lineWhTotal    = sizeCols.reduce((s,sz) => s + (lineSzTotals[sz]||0), 0);
+    const lineTotalProd  = items.reduce((s, it) => s + it.meta.total, 0);
+    // 소진율 = (총수량 - 창고소계) / 총수량
+    const lineRate       = lineTotalProd > 0 ? (lineTotalProd - lineWhTotal) / lineTotalProd : 0;
 
     // 라인 헤더
     html += `<tr class="m-group">
@@ -1088,10 +1088,12 @@ function drawApparelMatrix() {
           : (it.sizes[sz] || 0);
         return s + v;
       }, 0);
+      // 소진율 = (총수량 - 창고소계) / 총수량
+      const rate = it.meta.total > 0 ? (it.meta.total - whTotal) / it.meta.total : 0;
       html += `<tr>
         <td class="color-name">${colorDot(color)}${color}</td>
         <td style="text-align:center;font-size:12px;color:var(--muted)">${it.meta.total.toLocaleString()}</td>
-        <td style="text-align:center">${it.meta.total > 0 ? rateBadge(it.meta.rate) : '<span style="color:var(--muted)">—</span>'}</td>
+        <td style="text-align:center">${it.meta.total > 0 ? rateBadge(rate) : '<span style="color:var(--muted)">—</span>'}</td>
         ${sizeCols.map(sz => {
           const v = sz === '기타'
             ? Object.entries(it.sizes).filter(([k]) => !STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
@@ -1115,16 +1117,20 @@ function drawApparelMatrix() {
   // 전체 합계
   if (lines.length > 1) {
     const gtProd = metaEntries.reduce((s,[,m]) => s+m.total, 0);
-    const gtRem  = metaEntries.reduce((s,[,m]) => s+m.remaining, 0);
-    const gtRate = gtProd > 0 ? (gtProd - gtRem) / gtProd : 0;
     const gtSz   = {};
-    Object.values(sizeStock).forEach(sz => sizeCols.forEach(col => {
-      const v = col === '기타'
-        ? Object.entries(sz).filter(([k])=>!STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
-        : (sz[col]||0);
-      gtSz[col] = (gtSz[col]||0) + v;
-    }));
-    const gtWh = sizeCols.reduce((s,sz) => s+(gtSz[sz]||0), 0);
+    // 필터된 항목의 sizeStock만 합산
+    metaEntries.forEach(([name]) => {
+      const sz = sizeStock[name] || {};
+      sizeCols.forEach(col => {
+        const v = col === '기타'
+          ? Object.entries(sz).filter(([k])=>!STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
+          : (sz[col]||0);
+        gtSz[col] = (gtSz[col]||0) + v;
+      });
+    });
+    const gtWh   = sizeCols.reduce((s,sz) => s+(gtSz[sz]||0), 0);
+    // 소진율 = (총수량 - 창고소계) / 총수량
+    const gtRate = gtProd > 0 ? (gtProd - gtWh) / gtProd : 0;
     html += `<tr style="background:var(--surface2);font-weight:700;border-top:2px solid var(--accent)">
       <td style="padding:10px 14px;position:sticky;left:0;background:var(--surface2);color:var(--accent)">전체 합계</td>
       <td style="text-align:center;color:var(--accent)">${gtProd.toLocaleString()}</td>
