@@ -195,6 +195,7 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
   <div class="tab on"  onclick="switchTab('summary',this)">재고 현황 요약</div>
   <div class="tab"     onclick="switchTab('trend',this)">일별 재고 추이</div>
   <div class="tab"     onclick="switchTab('dash',this)">종합 대시보드</div>
+  <div class="tab"     onclick="switchTab('rate',this)">소진율 해석</div>
 </div>
 
 <div class="main">
@@ -364,6 +365,72 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ══════════ VIEW: RATE ══════════ -->
+  <div class="view" id="v-rate">
+    <div class="loading" id="lrate"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
+    <div id="crate" style="display:none">
+
+      <!-- KPI -->
+      <div class="kpi-row" id="rateKpi"></div>
+
+      <!-- 시즌별 소진율 + 구간 분포 -->
+      <div class="g2 sec">
+        <div>
+          <div class="sec-hdr"><span class="sec-title">시즌별 평균 소진율</span></div>
+          <div class="card"><canvas id="rateSeasonChart" style="max-height:240px"></canvas></div>
+        </div>
+        <div>
+          <div class="sec-hdr"><span class="sec-title">소진율 구간 분포</span></div>
+          <div class="card"><canvas id="rateBandChart" style="max-height:240px"></canvas></div>
+        </div>
+      </div>
+
+      <!-- 마감 긴급도 -->
+      <div class="sec">
+        <div class="sec-hdr"><span class="sec-title">⚠️ 마감 긴급 품목 — 소진율 낮고 마감 임박</span></div>
+        <div class="tbl-wrap" style="max-height:280px">
+          <table><thead><tr>
+            <th>품목 (라인)</th><th>시즌</th>
+            <th style="text-align:right">마감까지</th>
+            <th style="text-align:right">생산수량</th>
+            <th style="text-align:right">창고재고</th>
+            <th style="text-align:center">소진율</th>
+            <th style="text-align:right">잔류 예상</th>
+          </tr></thead><tbody id="rateUrgentTbl"></tbody></table>
+        </div>
+      </div>
+
+      <!-- 품목별 소진율 전체 테이블 -->
+      <div class="sec">
+        <div class="sec-hdr">
+          <span class="sec-title">품목별 소진율 전체</span>
+          <div class="controls">
+            <select id="rateFltSeason" onchange="drawRateTable()"><option value="">전체 시즌</option></select>
+            <select id="rateFltSort" onchange="drawRateTable()">
+              <option value="rate_asc">소진율 낮은 순</option>
+              <option value="rate_desc">소진율 높은 순</option>
+              <option value="remain_desc">창고재고 많은 순</option>
+              <option value="val_desc">재고액 높은 순</option>
+            </select>
+          </div>
+        </div>
+        <div class="tbl-wrap" style="max-height:480px">
+          <table><thead><tr>
+            <th>품목 (라인)</th><th>시즌</th>
+            <th style="text-align:right">생산수량</th>
+            <th style="text-align:right">판매주문</th>
+            <th style="text-align:right">창고재고</th>
+            <th style="text-align:right">원가</th>
+            <th style="text-align:right">재고액</th>
+            <th style="text-align:center">소진율</th>
+            <th>마감</th>
+          </tr></thead><tbody id="rateTbl"></tbody></table>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -1442,6 +1509,195 @@ function highlight(text, q) {
   return text.replace(new RegExp(escaped, 'gi'), m => `<mark>${m}</mark>`);
 }
 
+// ─── 소진율 해석 탭 ───────────────────────────────────────
+function renderRate() {
+  document.getElementById('lrate').style.display = 'none';
+  document.getElementById('crate').style.display = 'block';
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const metas = Object.values(apparelMeta);
+
+  // 창고재고 맵: 상품명 → 창고재고 합계 (메인 시트 기준)
+  const whMap = {};
+  rows.forEach(r => {
+    const n = str(r, C.name); const wh = num(r, C.warehouse); const pr = num(r, C.price);
+    if (!whMap[n]) whMap[n] = { wh: 0, price: pr };
+    whMap[n].wh += wh;
+    if (!whMap[n].price && pr) whMap[n].price = pr;
+  });
+
+  // 라인별로 집계 (apparelMeta는 full 상품명 키 → 라인이름으로 그룹)
+  const lineMap = {};
+  metas.forEach(m => {
+    const key = m.line || m.name;
+    if (!lineMap[key]) lineMap[key] = { line: key, season: m.season, total: 0, orders: 0, whQty: 0, price: 0, names: [] };
+    lineMap[key].total  += m.total;
+    lineMap[key].orders += m.orders;
+    lineMap[key].names.push(m.name);
+  });
+  // 창고재고/원가 집계
+  Object.values(lineMap).forEach(g => {
+    g.names.forEach(n => {
+      const w = whMap[n];
+      if (w) { g.whQty += w.wh; if (!g.price && w.price) g.price = w.price; }
+    });
+    // 소진율 = (총수량 - 창고재고) / 총수량
+    g.rate = g.total > 0 ? Math.min(1, (g.total - g.whQty) / g.total) : 0;
+    g.stockVal = g.whQty * g.price;
+  });
+  const lines = Object.values(lineMap);
+
+  // ── KPI ──
+  const avg = lines.length ? lines.reduce((s,l) => s + l.rate, 0) / lines.length : 0;
+  const over80 = lines.filter(l => l.rate >= 0.8).length;
+  const under30 = lines.filter(l => l.rate < 0.3).length;
+  const totalStockVal = lines.reduce((s,l) => s + l.stockVal, 0);
+  document.getElementById('rateKpi').innerHTML = kpiHTML([
+    { label: '전체 평균 소진율', val: Math.round(avg*100) + '%', color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
+    { label: '고소진 품목 (80%+)', val: over80 + '개', color: 'var(--green)' },
+    { label: '저소진 품목 (30% 미만)', val: under30 + '개', sub: '주의 필요', color: 'var(--red)' },
+    { label: '잔여 재고액 합계', val: '₩' + Math.round(totalStockVal/10000).toLocaleString() + '만', color: 'var(--orange)' },
+  ]);
+
+  // ── 시즌별 평균 소진율 바 차트 ──
+  const seasonGroups = {};
+  lines.forEach(l => {
+    if (!l.season) return;
+    if (!seasonGroups[l.season]) seasonGroups[l.season] = [];
+    seasonGroups[l.season].push(l.rate);
+  });
+  const seasonKeys = Object.keys(seasonGroups).sort();
+  const seasonAvgs = seasonKeys.map(s => Math.round(seasonGroups[s].reduce((a,v)=>a+v,0)/seasonGroups[s].length*100));
+  destroyChart('rateSeasonChart');
+  charts['rateSeasonChart'] = new Chart(document.getElementById('rateSeasonChart'), {
+    type: 'bar',
+    data: {
+      labels: seasonKeys,
+      datasets: [{
+        label: '평균 소진율(%)',
+        data: seasonAvgs,
+        backgroundColor: seasonKeys.map((_,i) => PALETTE[i%PALETTE.length]+'cc'),
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.raw + '%' } } },
+      scales: {
+        y: { min:0, max:100, ticks: { color:'var(--muted)', callback: v => v+'%' }, grid: { color:'rgba(255,255,255,.05)' } },
+        x: { ticks: { color:'var(--fg)' }, grid: { display: false } }
+      }
+    }
+  });
+
+  // ── 구간 분포 도넛 ──
+  const bands = { '0~30%':0, '30~60%':0, '60~80%':0, '80~100%':0 };
+  lines.forEach(l => {
+    const r = l.rate;
+    if      (r < 0.3) bands['0~30%']++;
+    else if (r < 0.6) bands['30~60%']++;
+    else if (r < 0.8) bands['60~80%']++;
+    else              bands['80~100%']++;
+  });
+  destroyChart('rateBandChart');
+  charts['rateBandChart'] = new Chart(document.getElementById('rateBandChart'), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(bands),
+      datasets: [{ data: Object.values(bands), backgroundColor: ['#ff4d6d','#ffd166','#4fc3f7','#43e97b'], borderWidth:0 }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position:'right', labels: { color:'var(--fg)', font:{size:12} } },
+        tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.raw + '개' } }
+      }
+    }
+  });
+
+  // ── 마감 긴급 품목 ──
+  const urgent = lines
+    .map(l => {
+      const dl = SEASON_DEADLINES[l.season];
+      if (!dl) return null;
+      const daysLeft = Math.round((new Date(dl) - today) / 86400000);
+      return { ...l, daysLeft };
+    })
+    .filter(l => l && l.daysLeft > 0 && l.daysLeft < 365 && l.rate < 0.6 && l.whQty > 0)
+    .sort((a,b) => (a.daysLeft - b.daysLeft) || (a.rate - b.rate));
+
+  document.getElementById('rateUrgentTbl').innerHTML = urgent.length ? urgent.map(l => {
+    const urgColor = l.daysLeft < 90 ? 'var(--red)' : l.daysLeft < 180 ? 'var(--yellow)' : 'var(--muted)';
+    const dailyVel = dates.length > 1 ? (() => {
+      // 일평균 소진: 창고재고 기준 trend
+      const firstCol = dates[0].colIdx, lastCol = dates[dates.length-1].colIdx;
+      let consumed = 0;
+      l.names.forEach(n => {
+        rows.filter(r => str(r,C.name) === n).forEach(r => {
+          consumed += num(r, firstCol) - num(r, lastCol);
+        });
+      });
+      return consumed / (dates.length - 1 || 1);
+    })() : 0;
+    const projRemain = dailyVel > 0 ? Math.max(0, Math.round(l.whQty - dailyVel * l.daysLeft)) : l.whQty;
+    const projColor = projRemain > l.whQty * 0.5 ? 'var(--red)' : projRemain > 0 ? 'var(--yellow)' : 'var(--green)';
+    return `<tr>
+      <td style="font-weight:600">${l.line}</td>
+      <td>${l.season}</td>
+      <td style="text-align:right;font-weight:700;color:${urgColor}">D-${l.daysLeft}</td>
+      <td style="text-align:right">${l.total.toLocaleString()}</td>
+      <td style="text-align:right">${l.whQty.toLocaleString()}</td>
+      <td style="text-align:center">${rateBadge(l.rate)}</td>
+      <td style="text-align:right;color:${projColor}">${projRemain > 0 ? projRemain.toLocaleString() + '개' : '소진 가능 ✓'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">긴급 품목 없음</td></tr>';
+
+  // ── 드롭다운 시즌 목록 ──
+  const seasons = uniq(lines.map(l => l.season).filter(Boolean)).sort();
+  document.getElementById('rateFltSeason').innerHTML =
+    '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
+
+  window._rateLines = lines;
+  drawRateTable();
+}
+
+function drawRateTable() {
+  const lines = window._rateLines || [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const fltSeason = document.getElementById('rateFltSeason').value;
+  const sort      = document.getElementById('rateFltSort').value;
+
+  let filtered = fltSeason ? lines.filter(l => l.season === fltSeason) : lines;
+  filtered = [...filtered].sort((a,b) => {
+    if (sort === 'rate_asc')    return a.rate - b.rate;
+    if (sort === 'rate_desc')   return b.rate - a.rate;
+    if (sort === 'remain_desc') return b.whQty - a.whQty;
+    if (sort === 'val_desc')    return b.stockVal - a.stockVal;
+    return 0;
+  });
+
+  document.getElementById('rateTbl').innerHTML = filtered.map(l => {
+    const dl = SEASON_DEADLINES[l.season];
+    let deadlineCell = '—';
+    if (dl) {
+      const daysLeft = Math.round((new Date(dl) - today) / 86400000);
+      const color = daysLeft < 0 ? 'var(--muted)' : daysLeft < 90 ? 'var(--red)' : daysLeft < 180 ? 'var(--yellow)' : 'var(--green)';
+      deadlineCell = `<span style="color:${color};font-weight:600">${daysLeft <= 0 ? '마감' : 'D-'+daysLeft}</span>`;
+    }
+    return `<tr>
+      <td style="font-weight:600">${l.line}</td>
+      <td>${l.season}</td>
+      <td style="text-align:right">${l.total.toLocaleString()}</td>
+      <td style="text-align:right">${l.orders.toLocaleString()}</td>
+      <td style="text-align:right">${l.whQty.toLocaleString()}</td>
+      <td style="text-align:right">${l.price.toLocaleString()}</td>
+      <td style="text-align:right;font-weight:600;color:var(--accent)">${l.stockVal > 0 ? '₩'+Math.round(l.stockVal/10000).toLocaleString()+'만' : '—'}</td>
+      <td style="text-align:center">${rateBadge(l.rate)}</td>
+      <td>${deadlineCell}</td>
+    </tr>`;
+  }).join('');
+}
+
 // ─── Tab switching ────────────────────────────────────────
 const rendered = {};
 function switchTab(name, el) {
@@ -1454,6 +1710,7 @@ function switchTab(name, el) {
     rendered[name] = true;
     if (name === 'dash')  renderDash();
     if (name === 'trend') renderTrend();
+    if (name === 'rate')  renderRate();
   }
   // Resize all charts in this view
   Object.values(charts).forEach(c => { try { c.resize(); } catch(e){} });
