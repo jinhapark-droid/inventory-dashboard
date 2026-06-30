@@ -166,6 +166,24 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
 .mcel-na  { color: var(--border); }
 .matrix-totrow td { font-weight: 700; border-top: 2px solid var(--border); color: var(--accent); }
 .color-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+/* AI 분석 섹션 */
+.ai-section { margin-bottom: 20px; }
+.ai-section-title { font-size: 14px; font-weight: 700; color: var(--fg); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.ai-summary { background: var(--surface2); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 14px 16px; font-size: 13px; line-height: 1.7; color: var(--fg); margin-bottom: 14px; }
+.ai-summary strong { color: var(--accent); }
+.ai-items { display: flex; flex-direction: column; gap: 10px; }
+.ai-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+.ai-item-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; font-weight: 700; }
+.ai-item-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.tag-green  { background: rgba(67,233,123,.18); color: var(--green); }
+.tag-blue   { background: rgba(79,195,247,.18); color: #4fc3f7; }
+.tag-yellow { background: rgba(255,209,102,.18); color: var(--yellow); }
+.tag-red    { background: rgba(255,77,109,.18); color: var(--red); }
+.ai-item-body { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.ai-item-body strong { color: var(--fg); font-weight: 600; }
+.ai-item-action { margin-top: 6px; font-size: 12px; color: var(--accent); font-weight: 600; }
+.ai-skus { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.ai-sku-chip { font-size: 11px; background: var(--surface2); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -372,6 +390,15 @@ mark { background: rgba(108,99,255,.35); color: var(--text); border-radius: 2px;
   <div class="view" id="v-rate">
     <div class="loading" id="lrate"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
     <div id="crate" style="display:none">
+
+      <!-- 데이터 기준일 + AI 분석 -->
+      <div class="sec" id="rateAnalysisSec" style="display:none">
+        <div class="sec-hdr">
+          <span class="sec-title">AI 소진율 분석</span>
+          <span id="rateDateBadge" style="font-size:12px;color:var(--muted);background:var(--surface2);padding:3px 10px;border-radius:20px"></span>
+        </div>
+        <div id="rateAnalysis"></div>
+      </div>
 
       <!-- KPI -->
       <div class="kpi-row" id="rateKpi"></div>
@@ -1589,6 +1616,197 @@ function buildRateLines() {
   return Object.values(lineMap);
 }
 
+function drawRateAnalysis(lines) {
+  const sec = document.getElementById('rateAnalysisSec');
+  if (!dates.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+
+  // 데이터 기준일 표시
+  const firstLabel = dates[0].label;
+  const lastLabel  = dates[dates.length-1].label;
+  document.getElementById('rateDateBadge').textContent = `📅 ${firstLabel} ~ ${lastLabel} 스냅샷 기준`;
+
+  const today   = new Date(); today.setHours(0,0,0,0);
+  const rated   = lines.filter(l => l.rate !== null && l.season === '26SS');
+  if (!rated.length) { sec.style.display = 'none'; return; }
+
+  const avg     = rated.reduce((s,l) => s + l.rate, 0) / rated.length;
+  const totalVal = rated.reduce((s,l) => s + l.stockVal, 0);
+
+  // 시즌 마감
+  const deadline  = new Date(SEASON_DEADLINES['26SS'] || '2026-09-30');
+  const daysLeft  = Math.round((deadline - today) / 86400000);
+  const targetRate = 0.85;
+  const gapNeeded  = Math.max(0, targetRate - avg);
+
+  // 일평균 소진 속도 계산
+  const firstCol = dates[0].colIdx, lastCol = dates[dates.length-1].colIdx;
+  const spanDays = dates.length - 1 || 1;
+  const lineVelo = {};
+  rated.forEach(l => {
+    let consumed = 0;
+    l.names.forEach(n => {
+      rows.filter(r => str(r,C.name)===n).forEach(r => { consumed += num(r,firstCol) - num(r,lastCol); });
+    });
+    lineVelo[l.line] = consumed / spanDays;
+  });
+
+  // 티어 분류
+  const t80  = rated.filter(l => l.rate >= 0.8).sort((a,b) => b.rate - a.rate);
+  const t60  = rated.filter(l => l.rate >= 0.6 && l.rate < 0.8).sort((a,b) => b.rate - a.rate);
+  const t30  = rated.filter(l => l.rate >= 0.3 && l.rate < 0.6).sort((a,b) => b.stockVal - a.stockVal);
+  const t00  = rated.filter(l => l.rate < 0.3).sort((a,b) => b.stockVal - a.stockVal);
+
+  // 자금 적체 Top 이슈 품목
+  const topIssue   = t00.slice(0, 3);
+  const totalIssueVal = topIssue.reduce((s,l) => s + l.stockVal, 0);
+
+  // 일평균 소진속도 기준 마감 내 소진 가능 여부
+  function canSell(l) {
+    const v = lineVelo[l.line] || 0;
+    if (v <= 0) return false;
+    return Math.ceil(l.whQty / v) <= daysLeft;
+  }
+
+  function pct(r) { return Math.round(r * 100) + '%'; }
+  function val(v) { return '₩' + Math.round(v/10000).toLocaleString() + '만'; }
+  function chip(l) {
+    const cs = canSell(l) ? 'color:var(--green)' : '';
+    return `<span class="ai-sku-chip" style="${cs}">${l.line} <b>${pct(l.rate)}</b>${l.whQty > 0 ? ' · ' + l.whQty.toLocaleString() + '개' : ''}</span>`;
+  }
+
+  // ── 전략 결정 로직 ──
+  const sections = [];
+
+  // 1. 전사 요약
+  const trendDir = avg >= 0.5 ? '순항 중' : avg >= 0.35 ? '관리 필요' : '긴급 개입 필요';
+  sections.push(`
+    <div class="ai-section">
+      <div class="ai-section-title">📊 전사 소진율 현황 — 26SS</div>
+      <div class="ai-summary">
+        현재 26SS 전사 평균 소진율 <strong>${pct(avg)}</strong> (데이터 기준: ${firstLabel}→${lastLabel}, ${spanDays}일 추적).
+        시즌 마감(${deadline.getMonth()+1}/${deadline.getDate()})까지 <strong>D-${daysLeft}</strong> 남은 시점에서 목표 소진율 ${Math.round(targetRate*100)}% 달성까지
+        <strong>+${Math.round(gapNeeded*100)}%p</strong> 추가 필요. 현 속도가 유지될 경우 일부 저소진 품목의 마감 잔류 리스크가 있습니다. 전략 등급: <strong>${trendDir}</strong>.
+        ${t00.length > 0 ? `저소진(30% 미만) ${t00.length}개 품목의 잔여 재고액 합산 ${val(t00.reduce((s,l)=>s+l.stockVal,0))}이 자금 적체의 핵심입니다.` : ''}
+      </div>
+    </div>`);
+
+  // 2. 80%+ — 정가 클로징
+  if (t80.length) {
+    sections.push(`
+      <div class="ai-section">
+        <div class="ai-section-title">🟢 고소진 품목 — 정가 클로징 구간</div>
+        <div class="ai-items">
+          <div class="ai-item">
+            <div class="ai-item-hdr">
+              <span class="ai-item-tag tag-green">Target · ${t80.length}개 품목</span>
+              소진율 80%+ — 정가 유지 후 품절 임박 메시지 활용
+            </div>
+            <div class="ai-skus">${t80.map(chip).join('')}</div>
+            <div class="ai-item-body">
+              ${t80.map(l => {
+                const daysToSell = lineVelo[l.line] > 0 ? Math.ceil(l.whQty / lineVelo[l.line]) : null;
+                return `<strong>${l.line}</strong>(${pct(l.rate)}) — 잔여 ${l.whQty}개${daysToSell ? ` · 현 속도로 약 ${daysToSell}일 내 소진 가능` : ''}.`;
+              }).join(' ')}
+            </div>
+            <div class="ai-item-action">→ 정가 유지. '잔여 수량 한정' 메시지로 정가 구매 비중을 극대화. 마감 30일 전 5% 이내 소폭 조정만 고려.</div>
+          </div>
+        </div>
+      </div>`);
+  }
+
+  // 3. 60~80% — 관망
+  if (t60.length) {
+    sections.push(`
+      <div class="ai-section">
+        <div class="ai-section-title">🔵 안정 구간 — 탄력 운영</div>
+        <div class="ai-items">
+          <div class="ai-item">
+            <div class="ai-item-hdr">
+              <span class="ai-item-tag tag-blue">Progress · ${t60.length}개 품목</span>
+              소진율 60~80% — 정가 기조 유지, 소폭 할인 병행 가능
+            </div>
+            <div class="ai-skus">${t60.map(chip).join('')}</div>
+            <div class="ai-item-body">
+              ${t60.map(l => `<strong>${l.line}</strong>(${pct(l.rate)}) — 잔여 ${l.whQty}개 · 재고액 ${val(l.stockVal)}.`).join(' ')}
+              현 소진 속도 유지 시 마감 전 80%+ 진입 가능 구간입니다.
+            </div>
+            <div class="ai-item-action">→ 정가 기조 유지. 채널 믹스(SNS 바이럴·할인쿠폰 소량 배포)로 속도 유지. 최대 10% 이내 탄력 할인 허용.</div>
+          </div>
+        </div>
+      </div>`);
+  }
+
+  // 4. 30~60% — 인하 필요
+  if (t30.length) {
+    const t30Val = t30.reduce((s,l) => s+l.stockVal, 0);
+    sections.push(`
+      <div class="ai-section">
+        <div class="ai-section-title">🟡 주의 구간 — 적극 프로모션 필요</div>
+        <div class="ai-items">
+          <div class="ai-item">
+            <div class="ai-item-hdr">
+              <span class="ai-item-tag tag-yellow">Issue · ${t30.length}개 품목</span>
+              소진율 30~60% — 재고액 합산 ${val(t30Val)}
+            </div>
+            <div class="ai-skus">${t30.map(chip).join('')}</div>
+            <div class="ai-item-body">
+              ${t30.sort((a,b)=>b.stockVal-a.stockVal).slice(0,4).map(l => {
+                const urgent = daysLeft < 120 ? '마감 내 소진 위험' : '모니터링 필요';
+                return `<strong>${l.line}</strong>(${pct(l.rate)}) — 잔여 ${l.whQty}개 · ${val(l.stockVal)} · ${urgent}.`;
+              }).join(' ')}
+            </div>
+            <div class="ai-item-action">→ 15~20% 할인 즉시 적용. 번들/세트 구성으로 단가 방어하며 수량 소진. D-60 이내 진입 시 추가 5% 확대.</div>
+          </div>
+        </div>
+      </div>`);
+  }
+
+  // 5. 30% 미만 — 긴급
+  if (t00.length) {
+    const t00Val = t00.reduce((s,l) => s+l.stockVal, 0);
+    const items = t00.slice(0, 5).map(l => {
+      const cantSell = !canSell(l);
+      const urgTag = cantSell ? '<span style="color:var(--red);font-weight:700"> ⚠️ 현 속도로 마감 내 소진 불가</span>' : '';
+      return `<div class="ai-item">
+        <div class="ai-item-hdr">
+          <span class="ai-item-tag tag-red">긴급 · ${pct(l.rate)}</span>
+          <strong>${l.line}</strong>${urgTag}
+        </div>
+        <div class="ai-item-body">
+          잔여 ${l.whQty.toLocaleString()}개 · 재고액 <strong>${val(l.stockVal)}</strong> · 일 평균 소진 ${(lineVelo[l.line]||0).toFixed(1)}개.
+          ${daysLeft > 0 && lineVelo[l.line] > 0 ? `현 속도 유지 시 마감까지 약 ${Math.round(lineVelo[l.line]*daysLeft)}개 소진 가능 (예상 잔류 ${Math.max(0,l.whQty-Math.round(lineVelo[l.line]*daysLeft))}개).` : ''}
+        </div>
+        <div class="ai-item-action">→ 즉시 25~35% 인하 적용. 마감일 역산 기준 판매 가능 일수 내 소진 목표 수량을 역계산해 할인율 결정. 방치 시 시즌 종료 후 전량 이월 리스크.</div>
+      </div>`;
+    }).join('');
+    sections.push(`
+      <div class="ai-section">
+        <div class="ai-section-title">🔴 저소진 긴급 처분 대상 — 재고액 합산 ${val(t00Val)}</div>
+        <div class="ai-items">${items}</div>
+      </div>`);
+  }
+
+  // 6. 기획 인사이트
+  const topSeller = rated.sort((a,b) => (b.orders||0)*b.price - (a.orders||0)*a.price)[0];
+  sections.push(`
+    <div class="ai-section">
+      <div class="ai-section-title">💡 차기 시즌 기획 참고</div>
+      <div class="ai-items">
+        <div class="ai-item">
+          <div class="ai-item-hdr"><span class="ai-item-tag tag-green">인사이트</span> 데이터 기반 선택과 집중</div>
+          <div class="ai-item-body">
+            ${t80.length ? `<strong>고소진 품목(${t80.map(l=>l.line).join(', ')})</strong>은 차기 시즌 물량 확대 및 컬러/핏 옵션 다양화를 검토합니다.` : ''}
+            ${t00.length ? ` <strong>저소진 품목군(${t00.slice(0,2).map(l=>l.line).join(', ')} 등)</strong>은 발주량 축소 또는 디자인 차별화 없이 재발주 지양을 권고합니다.` : ''}
+            ${t30.filter(l=>l.line.includes('캡')||l.line.includes('데이팩')).length ? ' 사이즈 리스크가 낮은 액세서리류는 시즌 후반에도 안정적 소진을 보여 차기 굿즈 라인업 확장이 객단가 보완에 유효합니다.' : ''}
+          </div>
+        </div>
+      </div>
+    </div>`);
+
+  document.getElementById('rateAnalysis').innerHTML = sections.join('');
+}
+
 function renderRate() {
   document.getElementById('lrate').style.display = 'none';
   document.getElementById('crate').style.display = 'block';
@@ -1708,6 +1926,7 @@ function renderRate() {
     '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
 
   window._rateLines = lines;
+  drawRateAnalysis(lines);
   drawRateTable();
 }
 
