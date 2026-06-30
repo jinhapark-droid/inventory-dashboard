@@ -167,6 +167,29 @@ mark { background: rgba(91,82,224,.2); color: var(--accent); border-radius: 2px;
 .mcel-na  { color: var(--border); }
 .matrix-totrow td { font-weight: 700; border-top: 2px solid var(--border); color: var(--accent); }
 .color-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+/* 시즌 진행도 */
+.season-prog-wrap { display: flex; flex-direction: column; gap: 14px; }
+.season-prog-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px 22px; position: relative; overflow: hidden;
+}
+.season-prog-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.season-prog-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.season-prog-name { font-size: 16px; font-weight: 700; }
+.season-prog-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: var(--accent); color: #fff; }
+.season-prog-deadline { font-size: 12px; color: var(--muted); margin-left: auto; }
+.season-prog-meta { display: flex; gap: 24px; margin-bottom: 10px; flex-wrap: wrap; }
+.season-prog-stat { display: flex; flex-direction: column; gap: 2px; }
+.season-prog-stat-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.season-prog-stat-val { font-size: 18px; font-weight: 700; }
+.prog-track { height: 12px; background: var(--surface2); border-radius: 6px; overflow: hidden; position: relative; margin-bottom: 6px; }
+.prog-fill-time { height: 100%; border-radius: 6px; transition: width .7s; }
+.prog-fill-rate { height: 100%; border-radius: 6px; opacity: .5; position: absolute; top: 0; left: 0; transition: width .7s; }
+.prog-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.prog-legend { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.prog-legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.prog-legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
 /* AI 분석 섹션 */
 .ai-section { margin-bottom: 20px; }
 .ai-section-title { font-size: 14px; font-weight: 700; color: var(--fg); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
@@ -224,6 +247,11 @@ mark { background: rgba(91,82,224,.2); color: var(--accent); border-radius: 2px;
     <div class="loading" id="lsummary"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
     <div id="csummary" style="display:none">
       <div class="kpi-row" id="kpi1"></div>
+
+      <!-- 26SS 시즌 진행도 -->
+      <div class="sec" id="seasonProgressSec">
+        <div id="seasonProgressBar"></div>
+      </div>
 
       <!-- 재고 추이 인사이트 -->
       <div class="insight-grid" id="insightGrid" style="display:none">
@@ -651,6 +679,7 @@ function renderSummary() {
   s1.innerHTML = '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
   s2.innerHTML = '<option value="">전체 카테고리</option>' + cats.map(c=>`<option>${c}</option>`).join('');
 
+  drawSeasonProgress();
   drawInsights();
   initApparelMatrixFilters();
   drawTable();
@@ -1176,6 +1205,126 @@ function drawVelo() {
       </tr>${drillRows(v.cat, color)}`;
     }).join('');
   }
+}
+
+// ─── 시즌 진행도 ────────────────────────────────────────────
+// 시즌별 시작일 (직전 시즌 마감 다음날)
+const SEASON_STARTS = {
+  '24SS': '2024-03-01',
+  '24FW': '2024-10-01',
+  '25SS': '2025-03-01',
+  '25FW': '2025-10-01',
+  '26SS': '2026-04-01',
+  '26FW': '2026-10-01',
+};
+const CURRENT_SEASON = '26SS';
+
+function drawSeasonProgress() {
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // 재고 있는 시즌만 표시 (현재 시즌 + 잔여 있는 이전 시즌)
+  const activeSeasons = Object.keys(SEASON_DEADLINES)
+    .filter(s => {
+      const hasStock = rows.some(r => str(r, C.season) === s && num(r, C.warehouse) > 0);
+      const notExpired = new Date(SEASON_DEADLINES[s]) >= today || s === CURRENT_SEASON;
+      return hasStock && notExpired;
+    })
+    .sort();
+
+  if (!activeSeasons.length) {
+    document.getElementById('seasonProgressSec').style.display = 'none';
+    return;
+  }
+
+  const cards = activeSeasons.map(season => {
+    const isCurrent = season === CURRENT_SEASON;
+    const start     = new Date(SEASON_STARTS[season] || SEASON_DEADLINES[season]);
+    const end       = new Date(SEASON_DEADLINES[season]);
+    const totalDays = Math.round((end - start) / 86400000);
+    const elapsed   = Math.max(0, Math.round((today - start) / 86400000));
+    const remaining = Math.max(0, Math.round((end - today) / 86400000));
+    const timePct   = Math.min(100, Math.round(elapsed / totalDays * 100));
+
+    // 소진율 (GID2 있으면 우선, 없으면 메인시트 기반 근사)
+    const sRows     = rows.filter(r => str(r, C.season) === season);
+    const whTotal   = sRows.reduce((s,r) => s + num(r, C.warehouse), 0);
+    const rcTotal   = sRows.reduce((s,r) => s + num(r, C.receipt), 0);
+    const stockVal  = sRows.reduce((s,r) => s + num(r, C.warehouse) * num(r, C.price), 0);
+
+    // 26SS: apparelMeta에서 총수량 가져오기
+    let prodTotal = 0, ratePct = null;
+    if (season === '26SS') {
+      prodTotal = Object.values(apparelMeta).filter(m => m.season === season).reduce((s,m) => s + m.total, 0);
+      if (prodTotal > 0) ratePct = Math.min(100, Math.round((prodTotal - whTotal) / prodTotal * 100));
+    }
+
+    // 마감까지 남은 시간 상태
+    const dColor = remaining <= 30 ? 'var(--red)' : remaining <= 90 ? 'var(--orange)' : 'var(--green)';
+    const timeBarColor = isCurrent ? 'var(--accent)' : 'var(--muted)';
+
+    // 진행 상태 메시지
+    let statusMsg = '';
+    if (remaining <= 0) statusMsg = '마감 완료';
+    else if (ratePct !== null) {
+      const gap = timePct - ratePct;
+      if (gap > 20) statusMsg = `⚠️ 시간 대비 소진 ${gap}%p 부족`;
+      else if (gap > 0) statusMsg = `🔶 소진율 시간 진행 대비 소폭 지연`;
+      else statusMsg = `✅ 소진율 양호`;
+    }
+
+    return `
+    <div class="season-prog-card${isCurrent ? ' current' : ''}">
+      <div class="season-prog-header">
+        <span class="season-prog-name">${season}</span>
+        ${isCurrent ? '<span class="season-prog-badge">현재 시즌</span>' : ''}
+        <span class="season-prog-deadline">마감 ${end.getFullYear()}.${String(end.getMonth()+1).padStart(2,'0')}.${String(end.getDate()).padStart(2,'0')}</span>
+      </div>
+      <div class="season-prog-meta">
+        <div class="season-prog-stat">
+          <span class="season-prog-stat-label">남은 일수</span>
+          <span class="season-prog-stat-val" style="color:${dColor}">D-${remaining}</span>
+        </div>
+        <div class="season-prog-stat">
+          <span class="season-prog-stat-label">경과</span>
+          <span class="season-prog-stat-val">${elapsed}일 / ${totalDays}일</span>
+        </div>
+        <div class="season-prog-stat">
+          <span class="season-prog-stat-label">시간 진행률</span>
+          <span class="season-prog-stat-val">${timePct}%</span>
+        </div>
+        ${ratePct !== null ? `<div class="season-prog-stat">
+          <span class="season-prog-stat-label">소진율</span>
+          <span class="season-prog-stat-val" style="color:${ratePct >= timePct ? 'var(--green)' : 'var(--red)'}">${ratePct}%</span>
+        </div>` : ''}
+        <div class="season-prog-stat">
+          <span class="season-prog-stat-label">잔여 재고액</span>
+          <span class="season-prog-stat-val" style="font-size:15px">₩${Math.round(stockVal/10000).toLocaleString()}만</span>
+        </div>
+        ${statusMsg ? `<div class="season-prog-stat" style="justify-content:flex-end;margin-left:auto">
+          <span style="font-size:12px;color:var(--muted);padding:4px 12px;background:var(--surface2);border-radius:20px">${statusMsg}</span>
+        </div>` : ''}
+      </div>
+
+      <!-- 시간 진행 바 -->
+      <div style="margin-bottom:4px;font-size:11px;color:var(--muted);font-weight:600">시즌 기간 진행률</div>
+      <div class="prog-track">
+        <div class="prog-fill-time" style="width:${timePct}%;background:${timeBarColor}"></div>
+        ${ratePct !== null ? `<div class="prog-fill-rate" style="width:${ratePct}%;background:var(--green)"></div>` : ''}
+      </div>
+      <div class="prog-labels">
+        <span>${SEASON_STARTS[season] ? SEASON_STARTS[season].slice(5).replace('-','/') : '—'} 시작</span>
+        <span>${timePct}% 경과</span>
+        <span>${end.getMonth()+1}/${end.getDate()} 마감</span>
+      </div>
+
+      ${ratePct !== null ? `<div class="prog-legend">
+        <div class="prog-legend-item"><div class="prog-legend-dot" style="background:var(--accent);opacity:.9"></div>시간 진행 ${timePct}%</div>
+        <div class="prog-legend-item"><div class="prog-legend-dot" style="background:var(--green);opacity:.6"></div>소진율 ${ratePct}%</div>
+      </div>` : ''}
+    </div>`;
+  });
+
+  document.getElementById('seasonProgressBar').innerHTML = `<div class="season-prog-wrap">${cards.join('')}</div>`;
 }
 
 // ─── 재고 추이 인사이트 ───────────────────────────────────
