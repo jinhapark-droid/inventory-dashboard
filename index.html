@@ -1525,8 +1525,6 @@ function drawApparelMatrix() {
     const line   = str(r, C.line);
     if (!name || isSpecialItem(name) || !season || !line) return;
     if (metaByName[name]) return;
-    // 입고합계 0이면 유령 항목 — 제외
-    if ((rcMap[name] || 0) === 0) return;
     if (!extraNames[name]) extraNames[name] = { season, line };
   });
 
