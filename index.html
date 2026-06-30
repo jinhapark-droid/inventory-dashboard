@@ -1518,9 +1518,6 @@ function drawApparelMatrix() {
     const line   = str(r, C.line);
     if (!name.match(/^\[/) || isSpecialItem(name) || !season || !line) return;
     if (metaByName[name]) return;
-    // 창고재고 합계가 0이면 제외 (모든 사이즈 품절)
-    const totalWh = Object.values(sizeStock[name] || {}).reduce((s,v) => s+v, 0);
-    if (totalWh === 0) return;
     if (!extraNames[name]) extraNames[name] = { season, line };
   });
 
@@ -1542,11 +1539,6 @@ function drawApparelMatrix() {
   // ── 라인별 그룹화 (여성 품목 독립 분리) ──
   const lineMap = {}; // line → [{ name, meta, sizes }]
   metaEntries.forEach(([name, meta]) => {
-    // GID2 항목 중 창고재고 0인 것 제외
-    if (meta.total > 0) {
-      const whSum = Object.values(sizeStock[name] || {}).reduce((s,v) => s+v, 0);
-      if (whSum === 0) return;
-    }
     const baseLine = meta.line || '기타';
     const line = lineKey(baseLine, name); // 여성 → "(여성)" suffix
     if (!lineMap[line]) lineMap[line] = [];
