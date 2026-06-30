@@ -854,7 +854,8 @@ function draw25FWVal() {
   // Group by 라인 (line), sum warehouse qty, track price (use first non-zero price)
   const lineMap = {};
   fw25.forEach(r => {
-    const line = str(r, C.line) || str(r, C.name);
+    const name = str(r, C.name);
+    const line = lineKey(str(r, C.line) || name, name);
     const wh   = num(r, C.warehouse);
     const pr   = num(r, C.price);
     if (!lineMap[line]) lineMap[line] = { wh: 0, price: pr };
@@ -1510,59 +1511,108 @@ function highlight(text, q) {
 }
 
 // ─── 소진율 해석 탭 ───────────────────────────────────────
+// 상품명에 "여성" 포함 여부로 라인 키 분리
+function lineKey(lineName, productName) {
+  const isWomen = /여성/i.test(productName);
+  return isWomen ? lineName + ' (여성)' : lineName;
+}
+
+function buildRateLines() {
+  // 창고재고 맵: 상품명 → { wh, price, receipt }
+  const whMap = {};
+  rows.forEach(r => {
+    const n = str(r, C.name);
+    const wh = num(r, C.warehouse);
+    const pr = num(r, C.price);
+    const rc = num(r, C.receipt);
+    if (!whMap[n]) whMap[n] = { wh: 0, price: pr, receipt: 0 };
+    whMap[n].wh      += wh;
+    whMap[n].receipt += rc;
+    if (!whMap[n].price && pr) whMap[n].price = pr;
+  });
+
+  const lineMap = {};
+
+  // ① GID2 항목 (26SS 등 소진율 시트에 있는 것) — total/orders 정확한 데이터 사용
+  const metaNames = new Set(Object.keys(apparelMeta));
+  Object.values(apparelMeta).forEach(m => {
+    const key = lineKey(m.line || m.name, m.name);
+    if (!lineMap[key]) lineMap[key] = { line: key, season: m.season, total: 0, orders: 0, whQty: 0, price: 0, names: [], fromMeta: true };
+    lineMap[key].total  += m.total;
+    lineMap[key].orders += m.orders;
+    lineMap[key].names.push(m.name);
+  });
+
+  // ② 메인 시트에만 있는 항목 (25FW, 25SS, 24FW, 24SS 등)
+  // 라인별로 묶어서 입고합계 → 소진율 근사치 계산
+  const mainLineMap = {};
+  rows.forEach(r => {
+    const n       = str(r, C.name);
+    const season  = str(r, C.season);
+    const line    = str(r, C.line) || n;
+    const wh      = num(r, C.warehouse);
+    const pr      = num(r, C.price);
+    const rc      = num(r, C.receipt);
+    if (!n || !season) return;
+    if (metaNames.has(n)) return; // GID2에 있는 것은 건너뜀
+
+    const key = lineKey(line, n);
+    if (!mainLineMap[key]) mainLineMap[key] = { line: key, season, receipt: 0, whQty: 0, price: pr, names: [] };
+    mainLineMap[key].receipt += rc;
+    mainLineMap[key].whQty  += wh;
+    if (!mainLineMap[key].price && pr) mainLineMap[key].price = pr;
+    if (!mainLineMap[key].names.includes(n)) mainLineMap[key].names.push(n);
+  });
+  Object.values(mainLineMap).forEach(g => {
+    if (!lineMap[g.line]) {
+      lineMap[g.line] = {
+        line: g.line, season: g.season,
+        total: 0, orders: 0,       // 생산수량 데이터 없음
+        whQty: g.whQty, price: g.price, names: g.names, fromMeta: false,
+        noMeta: true,              // 소진율 계산 불가 표시
+      };
+    }
+  });
+
+  // ③ GID2 항목 창고재고/원가 집계
+  Object.values(lineMap).forEach(g => {
+    if (g.fromMeta) {
+      g.names.forEach(n => {
+        const w = whMap[n];
+        if (w) { g.whQty += w.wh; if (!g.price && w.price) g.price = w.price; }
+      });
+    }
+    g.rate = (!g.noMeta && g.total > 0) ? Math.min(1, (g.total - g.whQty) / g.total) : null;
+    g.stockVal = g.whQty * g.price;
+  });
+
+  return Object.values(lineMap);
+}
+
 function renderRate() {
   document.getElementById('lrate').style.display = 'none';
   document.getElementById('crate').style.display = 'block';
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const metas = Object.values(apparelMeta);
-
-  // 창고재고 맵: 상품명 → 창고재고 합계 (메인 시트 기준)
-  const whMap = {};
-  rows.forEach(r => {
-    const n = str(r, C.name); const wh = num(r, C.warehouse); const pr = num(r, C.price);
-    if (!whMap[n]) whMap[n] = { wh: 0, price: pr };
-    whMap[n].wh += wh;
-    if (!whMap[n].price && pr) whMap[n].price = pr;
-  });
-
-  // 라인별로 집계 (apparelMeta는 full 상품명 키 → 라인이름으로 그룹)
-  const lineMap = {};
-  metas.forEach(m => {
-    const key = m.line || m.name;
-    if (!lineMap[key]) lineMap[key] = { line: key, season: m.season, total: 0, orders: 0, whQty: 0, price: 0, names: [] };
-    lineMap[key].total  += m.total;
-    lineMap[key].orders += m.orders;
-    lineMap[key].names.push(m.name);
-  });
-  // 창고재고/원가 집계
-  Object.values(lineMap).forEach(g => {
-    g.names.forEach(n => {
-      const w = whMap[n];
-      if (w) { g.whQty += w.wh; if (!g.price && w.price) g.price = w.price; }
-    });
-    // 소진율 = (총수량 - 창고재고) / 총수량
-    g.rate = g.total > 0 ? Math.min(1, (g.total - g.whQty) / g.total) : 0;
-    g.stockVal = g.whQty * g.price;
-  });
-  const lines = Object.values(lineMap);
+  const lines = buildRateLines();
 
   // ── KPI ──
-  const avg = lines.length ? lines.reduce((s,l) => s + l.rate, 0) / lines.length : 0;
-  const over80 = lines.filter(l => l.rate >= 0.8).length;
-  const under30 = lines.filter(l => l.rate < 0.3).length;
+  const ratedLines = lines.filter(l => l.rate !== null);
+  const avg = ratedLines.length ? ratedLines.reduce((s,l) => s + l.rate, 0) / ratedLines.length : 0;
+  const over80 = ratedLines.filter(l => l.rate >= 0.8).length;
+  const under30 = ratedLines.filter(l => l.rate < 0.3).length;
   const totalStockVal = lines.reduce((s,l) => s + l.stockVal, 0);
   document.getElementById('rateKpi').innerHTML = kpiHTML([
-    { label: '전체 평균 소진율', val: Math.round(avg*100) + '%', color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
+    { label: '26SS 평균 소진율', val: Math.round(avg*100) + '%', sub: `${ratedLines.length}개 품목`, color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
     { label: '고소진 품목 (80%+)', val: over80 + '개', color: 'var(--green)' },
     { label: '저소진 품목 (30% 미만)', val: under30 + '개', sub: '주의 필요', color: 'var(--red)' },
-    { label: '잔여 재고액 합계', val: '₩' + Math.round(totalStockVal/10000).toLocaleString() + '만', color: 'var(--orange)' },
+    { label: '잔여 재고액 합계', val: '₩' + Math.round(totalStockVal/10000).toLocaleString() + '만', sub: '전 시즌', color: 'var(--orange)' },
   ]);
 
-  // ── 시즌별 평균 소진율 바 차트 ──
+  // ── 시즌별 평균 소진율 바 차트 (소진율 데이터 있는 것만) ──
   const seasonGroups = {};
   lines.forEach(l => {
-    if (!l.season) return;
+    if (!l.season || l.rate === null) return;
     if (!seasonGroups[l.season]) seasonGroups[l.season] = [];
     seasonGroups[l.season].push(l.rate);
   });
@@ -1592,7 +1642,7 @@ function renderRate() {
 
   // ── 구간 분포 도넛 ──
   const bands = { '0~30%':0, '30~60%':0, '60~80%':0, '80~100%':0 };
-  lines.forEach(l => {
+  ratedLines.forEach(l => {
     const r = l.rate;
     if      (r < 0.3) bands['0~30%']++;
     else if (r < 0.6) bands['30~60%']++;
@@ -1623,7 +1673,7 @@ function renderRate() {
       const daysLeft = Math.round((new Date(dl) - today) / 86400000);
       return { ...l, daysLeft };
     })
-    .filter(l => l && l.daysLeft > 0 && l.daysLeft < 365 && l.rate < 0.6 && l.whQty > 0)
+    .filter(l => l && l.daysLeft > 0 && l.daysLeft < 365 && (l.rate === null || l.rate < 0.6) && l.whQty > 0)
     .sort((a,b) => (a.daysLeft - b.daysLeft) || (a.rate - b.rate));
 
   document.getElementById('rateUrgentTbl').innerHTML = urgent.length ? urgent.map(l => {
@@ -1647,7 +1697,7 @@ function renderRate() {
       <td style="text-align:right;font-weight:700;color:${urgColor}">D-${l.daysLeft}</td>
       <td style="text-align:right">${l.total.toLocaleString()}</td>
       <td style="text-align:right">${l.whQty.toLocaleString()}</td>
-      <td style="text-align:center">${rateBadge(l.rate)}</td>
+      <td style="text-align:center">${l.rate !== null ? rateBadge(l.rate) : '<span style="color:var(--muted);font-size:11px">데이터 없음</span>'}</td>
       <td style="text-align:right;color:${projColor}">${projRemain > 0 ? projRemain.toLocaleString() + '개' : '소진 가능 ✓'}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:20px">긴급 품목 없음</td></tr>';
@@ -1669,8 +1719,8 @@ function drawRateTable() {
 
   let filtered = fltSeason ? lines.filter(l => l.season === fltSeason) : lines;
   filtered = [...filtered].sort((a,b) => {
-    if (sort === 'rate_asc')    return a.rate - b.rate;
-    if (sort === 'rate_desc')   return b.rate - a.rate;
+    if (sort === 'rate_asc')    return (a.rate ?? -1) - (b.rate ?? -1);
+    if (sort === 'rate_desc')   return (b.rate ?? -1) - (a.rate ?? -1);
     if (sort === 'remain_desc') return b.whQty - a.whQty;
     if (sort === 'val_desc')    return b.stockVal - a.stockVal;
     return 0;
@@ -1692,7 +1742,7 @@ function drawRateTable() {
       <td style="text-align:right">${l.whQty.toLocaleString()}</td>
       <td style="text-align:right">${l.price.toLocaleString()}</td>
       <td style="text-align:right;font-weight:600;color:var(--accent)">${l.stockVal > 0 ? '₩'+Math.round(l.stockVal/10000).toLocaleString()+'만' : '—'}</td>
-      <td style="text-align:center">${rateBadge(l.rate)}</td>
+      <td style="text-align:center">${l.rate !== null ? rateBadge(l.rate) : '<span style="color:var(--muted);font-size:11px">데이터 없음</span>'}</td>
       <td>${deadlineCell}</td>
     </tr>`;
   }).join('');
