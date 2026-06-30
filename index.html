@@ -1499,8 +1499,8 @@ function drawApparelMatrix() {
   const sizeStock = {}; // 상품명 → { XS:0, S:0, … }
   rows.forEach(r => {
     const name = str(r, C.name);
-    // 시즌 태그 시작 & 특수 prefix 제외
-    if (!name.match(/^\[/) || isSpecialItem(name)) return;
+    // 특수 prefix([리퍼]/[B급]/[전시]) 제외
+    if (!name || isSpecialItem(name)) return;
     const sz = str(r, C.size).toUpperCase();
     const wh = num(r, C.warehouse);
     if (!sizeStock[name]) sizeStock[name] = {};
@@ -1523,7 +1523,7 @@ function drawApparelMatrix() {
     const name   = str(r, C.name);
     const season = str(r, C.season);
     const line   = str(r, C.line);
-    if (!name.match(/^\[/) || isSpecialItem(name) || !season || !line) return;
+    if (!name || isSpecialItem(name) || !season || !line) return;
     if (metaByName[name]) return;
     // 입고합계 0이면 유령 항목 — 제외
     if ((rcMap[name] || 0) === 0) return;
