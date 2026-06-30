@@ -1510,6 +1510,13 @@ function drawApparelMatrix() {
   // ── GID2(소진율 시트) 기반 meta 맵 ──
   const metaByName = apparelMeta; // name → meta (26SS 등)
 
+  // ── 입고합계 맵 (상품명 → 총 입고수량) ──
+  const rcMap = {};
+  rows.forEach(r => {
+    const name = str(r, C.name);
+    if (name) rcMap[name] = (rcMap[name] || 0) + num(r, C.receipt);
+  });
+
   // ── 메인 시트에서 GID2에 없는 시즌 항목 추가 ──
   const extraNames = {}; // name → { season, line }
   rows.forEach(r => {
@@ -1518,6 +1525,8 @@ function drawApparelMatrix() {
     const line   = str(r, C.line);
     if (!name.match(/^\[/) || isSpecialItem(name) || !season || !line) return;
     if (metaByName[name]) return;
+    // 입고합계 0이면 유령 항목 — 제외
+    if ((rcMap[name] || 0) === 0) return;
     if (!extraNames[name]) extraNames[name] = { season, line };
   });
 
@@ -1537,12 +1546,13 @@ function drawApparelMatrix() {
   });
 
   // ── 라인별 그룹화 (여성 품목 독립 분리) ──
-  const lineMap = {}; // line → [{ name, meta, sizes }]
+  const lineMap = {}; // line → [{ name, meta, origLine, sizes }]
   metaEntries.forEach(([name, meta]) => {
     const baseLine = meta.line || '기타';
     const line = lineKey(baseLine, name); // 여성 → "(여성)" suffix
     if (!lineMap[line]) lineMap[line] = [];
-    lineMap[line].push({ name, meta: { ...meta, line }, sizes: sizeStock[name] || {} });
+    // meta.line은 원본 유지 (extractColor가 product name에서 line 제거에 쓰임)
+    lineMap[line].push({ name, meta, origLine: baseLine, sizes: sizeStock[name] || {} });
   });
 
   // 사용된 사이즈 컬럼 결정 (STD 순 + 기타)
@@ -1600,7 +1610,7 @@ function drawApparelMatrix() {
 
     // 컬러별 행
     items.sort((a,b) => a.name.localeCompare(b.name)).forEach(it => {
-      const color   = extractColor(it.meta.name, it.meta.line);
+      const color   = extractColor(it.meta.name, it.origLine);
       const whTotal = sizeCols.reduce((s,sz) => {
         const v = sz === '기타'
           ? Object.entries(it.sizes).filter(([k]) => !STD_SIZES_M.includes(k)).reduce((s,[,v])=>s+v,0)
