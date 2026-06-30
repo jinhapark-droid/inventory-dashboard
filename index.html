@@ -1342,23 +1342,43 @@ function drawApparelMatrix() {
   const fSeason = document.getElementById('matrixSeason').value;
   const fLine   = document.getElementById('matrixLine').value;
 
-  // ── 소진율 시트 기반으로 품목 목록 구성 ──
-  // apparelMeta에 있는 모든 항목을 어패럴로 처리 (다이니마 백팩 등 포함)
-  let metaEntries = Object.entries(apparelMeta);
-  if (fSeason) metaEntries = metaEntries.filter(([, m]) => m.season === fSeason);
-  if (fLine)   metaEntries = metaEntries.filter(([, m]) => m.line   === fLine);
-
   // ── 원 시트에서 사이즈별 창고 재고 집계 (상품명 기준) ──
-  // 시즌 prefix [XX] 있는 모든 행 포함 (카테고리 무관)
   const sizeStock = {}; // 상품명 → { XS:0, S:0, … }
   rows.forEach(r => {
     const name = str(r, C.name);
-    if (!name.match(/^\[/)) return; // 시즌 태그 없으면 제외
+    if (!name.match(/^\[/)) return;
     const sz = str(r, C.size).toUpperCase();
     const wh = num(r, C.warehouse);
     if (!sizeStock[name]) sizeStock[name] = {};
     sizeStock[name][sz] = (sizeStock[name][sz] || 0) + wh;
   });
+
+  // ── GID2(소진율 시트) 기반 meta 맵 ──
+  const metaByName = apparelMeta; // name → meta (26SS 등)
+
+  // ── 메인 시트에서 GID2에 없는 시즌 항목 추가 ──
+  // 상품명(name = line × color) 별로 그룹화해 fakeMeta 생성
+  const extraNames = {}; // name → { season, line }
+  rows.forEach(r => {
+    const name   = str(r, C.name);
+    const season = str(r, C.season);
+    const line   = str(r, C.line);
+    if (!name.match(/^\[/) || !season || !line) return;
+    if (metaByName[name]) return; // GID2에 이미 있으면 건너뜀
+    if (!extraNames[name]) extraNames[name] = { season, line };
+  });
+
+  // 전체 항목 = GID2 + 메인시트 추가분
+  const allMeta = {
+    ...metaByName,
+    ...Object.fromEntries(Object.entries(extraNames).map(([name, d]) => [
+      name, { name, season: d.season, line: d.line, total: 0, orders: 0, remaining: 0, rate: 0 }
+    ]))
+  };
+
+  let metaEntries = Object.entries(allMeta);
+  if (fSeason) metaEntries = metaEntries.filter(([, m]) => m.season === fSeason);
+  if (fLine)   metaEntries = metaEntries.filter(([, m]) => m.line   === fLine);
 
   // ── 라인별 그룹화 ──
   const lineMap = {}; // line → [{ name, meta, sizes }]
@@ -1487,9 +1507,17 @@ function drawApparelMatrix() {
 }
 
 function initApparelMatrixFilters() {
-  const metas = Object.values(apparelMeta);
-  const seasons = uniq(metas.map(m => m.season).filter(Boolean)).sort();
-  const lines   = uniq(metas.map(m => m.line).filter(Boolean)).sort();
+  // GID2 + 메인 시트 모든 항목에서 시즌/라인 수집
+  const metaSeasons = Object.values(apparelMeta).map(m => m.season);
+  const mainSeasons = rows.filter(r => str(r,C.name).match(/^\[/) && str(r,C.season))
+                         .map(r => str(r, C.season));
+  const seasons = uniq([...metaSeasons, ...mainSeasons].filter(Boolean)).sort();
+
+  const metaLines = Object.values(apparelMeta).map(m => m.line);
+  const mainLines = rows.filter(r => str(r,C.name).match(/^\[/) && str(r,C.line))
+                       .map(r => str(r, C.line));
+  const lines = uniq([...metaLines, ...mainLines].filter(Boolean)).sort();
+
   document.getElementById('matrixSeason').innerHTML =
     '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
   document.getElementById('matrixLine').innerHTML =
