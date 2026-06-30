@@ -1492,11 +1492,15 @@ function drawApparelMatrix() {
   const fSeason = document.getElementById('matrixSeason').value;
   const fLine   = document.getElementById('matrixLine').value;
 
+  // [리퍼] 등 특수 prefix 판별
+  function isSpecialItem(name) { return /^\[리퍼\]|^\[B급\]|^\[전시\]/i.test(name); }
+
   // ── 원 시트에서 사이즈별 창고 재고 집계 (상품명 기준) ──
   const sizeStock = {}; // 상품명 → { XS:0, S:0, … }
   rows.forEach(r => {
     const name = str(r, C.name);
-    if (!name.match(/^\[/)) return;
+    // 시즌 태그 시작 & 특수 prefix 제외
+    if (!name.match(/^\[/) || isSpecialItem(name)) return;
     const sz = str(r, C.size).toUpperCase();
     const wh = num(r, C.warehouse);
     if (!sizeStock[name]) sizeStock[name] = {};
@@ -1507,14 +1511,16 @@ function drawApparelMatrix() {
   const metaByName = apparelMeta; // name → meta (26SS 등)
 
   // ── 메인 시트에서 GID2에 없는 시즌 항목 추가 ──
-  // 상품명(name = line × color) 별로 그룹화해 fakeMeta 생성
   const extraNames = {}; // name → { season, line }
   rows.forEach(r => {
     const name   = str(r, C.name);
     const season = str(r, C.season);
     const line   = str(r, C.line);
-    if (!name.match(/^\[/) || !season || !line) return;
-    if (metaByName[name]) return; // GID2에 이미 있으면 건너뜀
+    if (!name.match(/^\[/) || isSpecialItem(name) || !season || !line) return;
+    if (metaByName[name]) return;
+    // 창고재고 합계가 0이면 제외 (모든 사이즈 품절)
+    const totalWh = Object.values(sizeStock[name] || {}).reduce((s,v) => s+v, 0);
+    if (totalWh === 0) return;
     if (!extraNames[name]) extraNames[name] = { season, line };
   });
 
@@ -1528,14 +1534,23 @@ function drawApparelMatrix() {
 
   let metaEntries = Object.entries(allMeta);
   if (fSeason) metaEntries = metaEntries.filter(([, m]) => m.season === fSeason);
-  if (fLine)   metaEntries = metaEntries.filter(([, m]) => m.line   === fLine);
+  if (fLine)   metaEntries = metaEntries.filter(([, m]) => {
+    // 여성 독립 품목: lineKey 적용 후 비교
+    return lineKey(m.line || m.name, m.name) === fLine;
+  });
 
-  // ── 라인별 그룹화 ──
+  // ── 라인별 그룹화 (여성 품목 독립 분리) ──
   const lineMap = {}; // line → [{ name, meta, sizes }]
   metaEntries.forEach(([name, meta]) => {
-    const line = meta.line || '기타';
+    // GID2 항목 중 창고재고 0인 것 제외
+    if (meta.total > 0) {
+      const whSum = Object.values(sizeStock[name] || {}).reduce((s,v) => s+v, 0);
+      if (whSum === 0) return;
+    }
+    const baseLine = meta.line || '기타';
+    const line = lineKey(baseLine, name); // 여성 → "(여성)" suffix
     if (!lineMap[line]) lineMap[line] = [];
-    lineMap[line].push({ name, meta, sizes: sizeStock[name] || {} });
+    lineMap[line].push({ name, meta: { ...meta, line }, sizes: sizeStock[name] || {} });
   });
 
   // 사용된 사이즈 컬럼 결정 (STD 순 + 기타)
@@ -1663,9 +1678,11 @@ function initApparelMatrixFilters() {
                          .map(r => str(r, C.season));
   const seasons = uniq([...metaSeasons, ...mainSeasons].filter(Boolean)).sort();
 
-  const metaLines = Object.values(apparelMeta).map(m => m.line);
-  const mainLines = rows.filter(r => str(r,C.name).match(/^\[/) && str(r,C.line))
-                       .map(r => str(r, C.line));
+  // lineKey 적용 — 여성 품목은 "(여성)" suffix
+  const metaLines = Object.values(apparelMeta).map(m => lineKey(m.line, m.name));
+  const mainLines = rows
+    .filter(r => str(r,C.name).match(/^\[/) && str(r,C.line))
+    .map(r => lineKey(str(r,C.line), str(r,C.name)));
   const lines = uniq([...metaLines, ...mainLines].filter(Boolean)).sort();
 
   document.getElementById('matrixSeason').innerHTML =
