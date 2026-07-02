@@ -1,0 +1,22 @@
+name: Daily Slack 재고 현황
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5'  # 평일 오후 7시 KST (10:00 UTC)
+  workflow_dispatch:          # 수동 실행 가능
+
+jobs:
+  send-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run daily slack script
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/daily_slack.py
