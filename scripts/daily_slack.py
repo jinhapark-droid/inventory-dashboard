@@ -162,7 +162,17 @@ elif app_qty > tent_qty * 3:
 else:
     yday_comment = f"어패럴 {app_qty}개·텐트 {tent_qty}개 고른 판매. 26SS 마감까지 {d_left}일, 소진율 관리 중요한 시점."
 
-insight = f"어패럴·텐트 중심 전일 판매를 분석했어요. {yday_comment}"
+tent_stock_val = round(cat_map.get('텐트', {}).get('stock_val', 0) / 10000)
+app_stock_val  = round(cat_map.get('어패럴', {}).get('stock_val', 0) / 10000)
+tent_daily_spd = round(cat_map.get('텐트', {}).get('sold14', 0) / span_days, 1)
+insight = (
+    f"텐트 카테고리 재고액(₩{tent_stock_val:,}만)이 어패럴(₩{app_stock_val:,}만)과 비슷한 수준인데 "
+    f"소진 속도는 {tent_daily_spd}개/일로 절반에 불과해요. "
+    f"26SS 시즌은 마감까지 {d_left}일 남은 상황에서 소진율이 시간 대비 {abs(gap)}%p "
+    f"{'뒤처지고' if gap > 0 else '앞서고'} 있어 7월 프로모션 효과가 중요한 시점이에요."
+)
+if diff_pct < -20:
+    insight += f" 오늘 판매량({int(today_sold)}개)은 최근 평균 대비 {abs(diff_pct)}% 저조했어요."
 
 today_str = f"{today.month}/{today.day}"
 message = f"""[재고 현황 업데이트] {today_str} 오후 7시
