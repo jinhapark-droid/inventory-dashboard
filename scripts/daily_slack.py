@@ -109,18 +109,60 @@ for cat, d in cats_sorted:
 diff_str = f"+{diff_pct}%" if diff_pct >= 0 else f"{diff_pct}%"
 gap_str  = f"{gap}%p 지연" if gap > 0 else f"{abs(gap)}%p 선행"
 
-# 인사이트
-top_cat   = cats_sorted[0][0] if cats_sorted else '어패럴'
-tent_val  = round(cat_map.get('텐트', {}).get('stock_val', 0) / 10000)
-app_val   = round(cat_map.get('어패럴', {}).get('stock_val', 0) / 10000)
-tent_daily = round(cat_map.get('텐트', {}).get('sold14', 0) / span_days, 1)
-insight = (
-    f"텐트 카테고리 재고액(₩{tent_val:,}만)이 재고 중 큰 비중을 차지하는데 소진 속도는 {tent_daily}개/일로 낮아요. "
-    f"26SS 시즌은 마감까지 {d_left}일 남은 상황에서 소진율이 시간 대비 {abs(gap)}%p {'뒤처지고' if gap > 0 else '앞서고'} 있어 "
-    f"7월 프로모션 효과가 중요한 시점이에요."
+# 어제 카테고리별 판매 집계
+cat_sold_yday = {}
+line_sold_yday = {}
+if len(valid_date_cols) >= 2:
+    prev_col = valid_date_cols[-2]
+    last_col = valid_date_cols[-1]
+    for r in rows:
+        if len(r) <= 14: continue
+        name = s(r[0])
+        if not name or SPECIAL.search(name): continue
+        cat  = s(r[6]) or '기타'
+        line = s(r[9]) or name
+        price = num(r[5])
+        sold = max(0, (num(r[prev_col]) if prev_col < len(r) else 0) - (num(r[last_col]) if last_col < len(r) else 0))
+        if sold == 0: continue
+        if cat not in cat_sold_yday:
+            cat_sold_yday[cat] = {'qty': 0, 'val': 0}
+        cat_sold_yday[cat]['qty'] += sold
+        cat_sold_yday[cat]['val'] += sold * price
+        if line not in line_sold_yday:
+            line_sold_yday[line] = {'cat': cat, 'qty': 0, 'val': 0}
+        line_sold_yday[line]['qty'] += sold
+        line_sold_yday[line]['val'] += sold * price
+
+yday_label = f"{today.month}/{today.day - 1}" if today.day > 1 else "어제"
+
+# 카테고리 요약줄
+yday_cat_lines = ''
+for cat in ['어패럴', '텐트', '기어']:
+    d = cat_sold_yday.get(cat)
+    if d and d['qty'] > 0:
+        yday_cat_lines += f"\n{cat} {d['qty']}개 — ₩{round(d['val']/10000, 1)}만"
+
+# 판매 상위 품목 (수량 기준 top 5)
+top_lines_yday = sorted(line_sold_yday.items(), key=lambda x: -x[1]['qty'])[:5]
+top_lines_str = '\n'.join(
+    f"· {line} {d['qty']}개 (₩{round(d['val']/10000, 1)}만)"
+    for line, d in top_lines_yday
 )
-if diff_pct < -20:
-    insight += f" 오늘 판매량({int(today_sold)}개)은 최근 평균 대비 {abs(diff_pct)}% 저조했어요."
+
+# 인사이트 코멘트
+app_qty  = cat_sold_yday.get('어패럴', {}).get('qty', 0)
+tent_qty = cat_sold_yday.get('텐트', {}).get('qty', 0)
+app_val2 = round(cat_sold_yday.get('어패럴', {}).get('val', 0) / 10000, 1)
+tent_val2= round(cat_sold_yday.get('텐트', {}).get('val', 0) / 10000, 1)
+
+if tent_qty > 0 and tent_val2 >= app_val2:
+    yday_comment = f"수량은 어패럴({app_qty}개)이 많았지만 텐트({tent_qty}개)가 단가 우위로 매출 비슷. 텐트 단가 레버리지 주목."
+elif app_qty > tent_qty * 3:
+    yday_comment = f"어패럴이 수량 기준 전체의 {round(app_qty/(app_qty+tent_qty+1)*100)}% 차지. 텐트는 {tent_qty}개로 부진 — 7월 프로모션 연계 필요."
+else:
+    yday_comment = f"어패럴 {app_qty}개·텐트 {tent_qty}개 고른 판매. 26SS 마감까지 {d_left}일, 소진율 관리 중요한 시점."
+
+insight = f"어패럴·텐트 중심 전일 판매를 분석했어요. {yday_comment}"
 
 today_str = f"{today.month}/{today.day}"
 message = f"""[재고 현황 업데이트] {today_str} 오후 7시
@@ -136,6 +178,11 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 
 💡 인사이트
 {insight}
+
+📈 어제({yday_label}) 판매 현황{yday_cat_lines}
+
+판매 상위 품목
+{top_lines_str}
 
 🔗 https://jinhapark-droid.github.io/inventory-dashboard/"""
 
