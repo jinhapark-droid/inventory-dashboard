@@ -43,6 +43,8 @@ total_wh = 0
 today_sold = 0
 total_14 = 0
 cat_map = {}
+order_cat_map = {}   # 접수건 카테고리별 합계
+preorder_items = []  # 재고 0인데 접수건 있는 품목
 
 for r in rows:
     if len(r) <= 14: continue
@@ -51,8 +53,18 @@ for r in rows:
     wh    = num(r[14])
     price = num(r[5])
     cat   = s(r[6]) or '기타'
+    line  = s(r[9]) or name
+    order = num(r[13]) if len(r) > 13 else 0  # 접수건 (컬럼 N)
     total_stock_val += wh * price
     total_wh        += wh
+
+    # 접수건 집계
+    if order > 0:
+        if cat not in order_cat_map:
+            order_cat_map[cat] = 0
+        order_cat_map[cat] += order
+        if wh == 0:
+            preorder_items.append((line, int(order), cat))
 
     if len(valid_date_cols) >= 2:
         prev_val = num(r[valid_date_cols[-2]]) if valid_date_cols[-2] < len(r) else 0
@@ -212,6 +224,28 @@ insight = (
 if diff_pct < -20:
     insight += f" 오늘 판매량({int(today_sold)}개)은 최근 평균 대비 {abs(diff_pct)}% 저조했어요."
 
+# 접수건 섹션
+total_orders = sum(order_cat_map.values())
+order_section = f"\n총 {int(total_orders)}건"
+for cat in ['어패럴', '텐트', '기어']:
+    qty = order_cat_map.get(cat, 0)
+    if qty > 0:
+        order_section += f"\n{cat} {int(qty)}건"
+other_orders = sum(v for k, v in order_cat_map.items() if k not in ('어패럴', '텐트', '기어'))
+if other_orders > 0:
+    order_section += f"\n기타 {int(other_orders)}건"
+if preorder_items:
+    # 라인명 기준으로 합산
+    preorder_merged = {}
+    for line, qty, cat in preorder_items:
+        key = (line, cat)
+        preorder_merged[key] = preorder_merged.get(key, 0) + qty
+    order_section += "\n\n⚠️ 사전구매 중 (재고 0)"
+    for (line, cat), qty in sorted(preorder_merged.items(), key=lambda x: -x[1])[:5]:
+        order_section += f"\n· {line} {qty}건 [{cat}]"
+if total_orders == 0:
+    order_section = "\n접수건 없음"
+
 today_str = f"{today.month}/{today.day}"
 message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 
@@ -231,6 +265,8 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 
 판매 상위 품목
 {top_lines_str}
+
+📬 금일 출고 접수{order_section}
 
 🔔 변동사항{changes_lines}
 
