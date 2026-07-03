@@ -149,6 +149,44 @@ top_lines_str = '\n'.join(
     for line, d in top_lines_yday
 )
 
+# 변동사항 감지 (입고 / 신규 품목)
+restocked_items = []
+new_items = []
+if len(valid_date_cols) >= 2:
+    prev_col  = valid_date_cols[-2]
+    last_col  = valid_date_cols[-1]
+    first_col = valid_date_cols[0]
+    for r in rows:
+        if len(r) <= 14: continue
+        name = s(r[0])
+        if not name or SPECIAL.search(name): continue
+        line  = s(r[9]) or name
+        prev_v = num(r[prev_col]) if prev_col < len(r) else 0
+        last_v = num(r[last_col]) if last_col < len(r) else 0
+        diff   = last_v - prev_v
+        # 입고: 재고가 10개 이상 늘어난 경우
+        if diff >= 10:
+            restocked_items.append((line, int(diff)))
+        # 신규: 14일 창 내 모든 이전 날짜가 0/None이고 최근에 재고 생김
+        if last_v > 0:
+            all_prev_zero = all(
+                (num(r[i]) if i < len(r) and r[i] and r[i].get('v') is not None else 0) == 0
+                for i in valid_date_cols[:-1]
+            )
+            if all_prev_zero:
+                new_items.append((line, int(last_v)))
+
+restocked_items = sorted(restocked_items, key=lambda x: -x[1])[:5]
+new_items = new_items[:5]
+
+changes_lines = ''
+for line, qty in restocked_items:
+    changes_lines += f"\n📥 {line} +{qty:,}개 (입고된 것 같아요)"
+for line, qty in new_items:
+    changes_lines += f"\n🆕 신규 품목: {line} ({qty:,}개)"
+if not changes_lines:
+    changes_lines = '\n변동사항 없음'
+
 # 인사이트 코멘트
 app_qty  = cat_sold_yday.get('어패럴', {}).get('qty', 0)
 tent_qty = cat_sold_yday.get('텐트', {}).get('qty', 0)
@@ -193,6 +231,8 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 
 판매 상위 품목
 {top_lines_str}
+
+🔔 변동사항{changes_lines}
 
 🔗 https://jinhapark-droid.github.io/inventory-dashboard/"""
 
