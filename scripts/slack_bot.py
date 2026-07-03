@@ -75,10 +75,10 @@ def get_inventory():
 
         key = f'{line}||{season}'
         if key not in line_map:
-            line_map[key] = {'line': line, 'season': season, 'cat': cat, 'wh': 0, 'val': 0, 'sold14': 0}
+            line_map[key] = {'line': line, 'season': season, 'cat': cat, 'wh': 0, 'val': 0, 'daily': 0}
         line_map[key]['wh']    += wh
         line_map[key]['val']   += wh * price
-        line_map[key]['sold14'] += sold14
+        line_map[key]['daily'] += sold14
 
         if season not in season_map:
             season_map[season] = {'wh': 0, 'val': 0, 'sold14': 0}
@@ -105,8 +105,12 @@ def get_inventory():
     end    = date(2026, 8, 31)
     time_pct = round((today - start).days / (end - start).days * 100)
 
+    # daily 누적값을 span으로 나눠 개/일로 변환
+    for v in line_map.values():
+        v['daily'] = round(v['daily'] / span, 1)
+
     top_lines = sorted(line_map.values(), key=lambda x: -x['val'])[:10]
-    top_sold  = sorted(line_map.values(), key=lambda x: -x['sold14'])[:10]
+    top_sold  = sorted(line_map.values(), key=lambda x: -x['daily'])[:10]
 
     return {
         'total_wh': int(total_wh),
