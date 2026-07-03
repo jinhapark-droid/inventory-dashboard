@@ -207,12 +207,12 @@ def is_bot_parent(channel, thread_ts):
 
 @app.route('/slack/events', methods=['POST'])
 def slack_events():
-    if not verify_slack(request):
-        return jsonify({'error': 'invalid signature'}), 403
-
-    body = request.get_json()
+    body = request.get_json(force=True, silent=True) or {}
     if body.get('type') == 'url_verification':
         return jsonify({'challenge': body['challenge']})
+
+    if not verify_slack(request):
+        return jsonify({'error': 'invalid signature'}), 403
 
     event    = body.get('event', {})
     event_id = body.get('event_id', '')
