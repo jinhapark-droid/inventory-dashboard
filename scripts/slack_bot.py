@@ -88,22 +88,20 @@ def get_inventory():
 
     span = max(len(date_cols) - 1, 1)
 
-    rate_data  = fetch_gviz(GID_RATE)
-    rate_rows  = rate_data['table']['rows'][1:]
-    tot26 = wh26 = 0
-    for r in rate_rows:
-        c = r['c']
-        def s2(x): return str(x.get('v') or '').strip() if x else ''
-        def n2(x): return float(x.get('v') or 0) if x else 0
-        if len(c) > 7 and s2(c[2]) == '26SS':
-            tot26 += n2(c[5]); wh26 += n2(c[7])
-    rate26 = round((tot26 - wh26) / tot26 * 100) if tot26 > 0 else 0
-
-    today  = date.today()
-    d_left = (date(2026, 8, 31) - today).days
-    start  = date(2026, 4, 1)
-    end    = date(2026, 8, 31)
+    today    = date.today()
+    d_left   = (date(2026, 8, 31) - today).days
+    start    = date(2026, 4, 1)
+    end      = date(2026, 8, 31)
     time_pct = round((today - start).days / (end - start).days * 100)
+
+    # 26SS 잔여재고 / 일평균 소진 (메인시트 기반)
+    val26_wh = val26_sold = 0
+    for v in season_map.get('26SS', {}).values():
+        pass
+    s26 = season_map.get('26SS', {'wh': 0, 'val': 0, 'sold14': 0})
+    val26_man   = round(s26['val'] / 10000)
+    daily26_val = round(s26['sold14'] / span / 10000, 1)
+    days_to_zero = round(s26['val'] / (s26['sold14'] / span)) if s26['sold14'] > 0 else 999
 
     # daily 누적값을 span으로 나눠 개/일로 변환
     for v in line_map.values():
@@ -116,105 +114,129 @@ def get_inventory():
         'total_wh': int(total_wh),
         'total_val_man': round(total_val / 10000),
         'cat_map': {k: {'wh': int(v['wh']), 'val_man': round(v['val']/10000),
-                        'daily': round(v['sold14']/span, 1)} for k, v in cat_map.items()},
+                        'daily': round(v['sold14']/span, 1)} for k, v in cat_map.items()
+                    if k not in ('', None)},
         'season_map': {k: {'wh': int(v['wh']), 'val_man': round(v['val']/10000),
                            'daily': round(v['sold14']/span, 1)} for k, v in season_map.items()},
+        'line_map': line_map,
         'top_lines': top_lines, 'top_sold': top_sold,
-        'rate26': rate26, 'd_left': d_left, 'time_pct': time_pct,
+        'val26_man': val26_man, 'daily26_val': daily26_val, 'days_to_zero': days_to_zero,
+        'd_left': d_left, 'time_pct': time_pct,
         'span': span,
     }
 
+def search_lines(text, line_map):
+    """질문에서 품목명 키워드 추출해 line_map 검색"""
+    # 불용어 제거
+    stopwords = {'재고', '현황', '알려줘', '알려', '줘', '얼마', '몇', '개', '수량',
+                 '추이', '판매', '소진', '속도', '빠른', '많은', '남은', '이번주', '지난',
+                 '7일간', '14일', '최근', '전체', '전사', '요약'}
+    words = [w for w in re.split(r'[\s\[\]()]+', text) if len(w) >= 2 and w not in stopwords]
+    if not words:
+        return []
+    results = []
+    for v in line_map.values():
+        name_lower = v['line'].lower()
+        if any(w.lower() in name_lower for w in words):
+            results.append(v)
+    return sorted(results, key=lambda x: -x['val'])
+
 def answer(text, inv):
     t = text.lower()
+    line_map = inv['line_map']
 
-    # 전체 요약
+    # ── 특정 품목명 검색 (최우선) ──────────────────────────────
+    matched = search_lines(text, line_map)
+    # 카테고리/시즌 키워드가 아닌 경우에만 품목 검색 결과 사용
+    generic_keywords = {'전체', '전사', '요약', '현황', '총', '텐트', '어패럴', '의류', '기어',
+                        '많이', '잘팔', '재고많', '소진율', '마감', '26ss', '25fw', '역시즌'}
+    is_generic = any(k in t for k in generic_keywords)
+
+    if matched and not is_generic:
+        if len(matched) == 1:
+            l = matched[0]
+            daily = l['daily']
+            days_left = round(l['wh'] / daily) if daily > 0 else None
+            days_str = f" · 현재 속도로 약 {days_left}일치 재고" if days_left else ""
+            return (f"📦 {l['line']} ({l['season']}) [{l['cat']}]\n"
+                    f"창고재고 {int(l['wh']):,}개 · ₩{round(l['val']/10000):,}만\n"
+                    f"최근 14일 일평균 {daily}개/일{days_str}")
+        else:
+            lines = '\n'.join(
+                f"· {l['line']} ({l['season']}) — {int(l['wh']):,}개 · ₩{round(l['val']/10000):,}만 · {l['daily']}개/일"
+                for l in matched[:7]
+            )
+            total_wh = sum(l['wh'] for l in matched)
+            total_val = sum(l['val'] for l in matched)
+            return (f"🔍 검색 결과 ({len(matched)}개 라인)\n"
+                    f"합계 {int(total_wh):,}개 · ₩{round(total_val/10000):,}만\n\n"
+                    f"{lines}")
+
+    # ── 카테고리별 ────────────────────────────────────────────
+    if '텐트' in t and not any(k in t for k in ['전체', '전사']):
+        d = inv['cat_map'].get('텐트', {})
+        tops = [l for l in inv['top_lines'] if l['cat'] == '텐트'][:5]
+        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
+        return (f"⛺ 텐트 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
+
+    if any(k in t for k in ['어패럴', '의류', '옷']):
+        d = inv['cat_map'].get('어패럴', {})
+        tops = [l for l in inv['top_lines'] if l['cat'] == '어패럴'][:5]
+        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
+        return (f"👕 어패럴 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
+
+    if any(k in t for k in ['기어', 'gear']):
+        d = inv['cat_map'].get('기어', {})
+        tops = [l for l in inv['top_lines'] if l['cat'] == '기어'][:5]
+        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
+        return (f"🎒 기어 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
+
+    # ── 시즌별 ───────────────────────────────────────────────
+    if '26ss' in t or '26시즌' in t or '26 ss' in t:
+        s = inv['season_map'].get('26SS', {})
+        d2z = inv['days_to_zero']
+        pace = f"현재 속도로 D-{d2z}일 소진 예상 ({'마감 전 소진 불가' if d2z > inv['d_left'] else '마감 전 소진 가능'})"
+        return (f"📅 26SS 시즌 현황 (D-{inv['d_left']}, 마감 8/31)\n"
+                f"잔여재고 {s.get('wh',0):,}개 · ₩{inv['val26_man']:,}만\n"
+                f"일평균 소진 ₩{inv['daily26_val']}만 · {pace}")
+
+    if '25fw' in t or '역시즌' in t or '25 fw' in t:
+        s = inv['season_map'].get('25FW', {})
+        return (f"❄️ 25FW 역시즌 재고\n"
+                f"재고 {s.get('wh',0):,}개 · ₩{s.get('val_man',0):,}만 · {s.get('daily',0)}개/일")
+
+    # ── 판매 / 소진 랭킹 ─────────────────────────────────────
+    if any(k in t for k in ['많이 팔', '잘 팔', '잘팔', '소진 빠', '판매 순', '판매순']):
+        tops = inv['top_sold'][:7]
+        rows = '\n'.join(f"  {i+1}. {l['line']} ({l['season']}) — {l['daily']}개/일 · 재고 {int(l['wh']):,}개" for i, l in enumerate(tops))
+        return f"🔥 일평균 소진 상위 품목 (최근 14일)\n{rows}"
+
+    if any(k in t for k in ['재고 많', '많은 재고', '남은 재고', '쌓인', '고재고']):
+        tops = inv['top_lines'][:7]
+        rows = '\n'.join(f"  {i+1}. {l['line']} ({l['season']}) — ₩{round(l['val']/10000):,}만 · {int(l['wh']):,}개" for i, l in enumerate(tops))
+        return f"📦 재고액 상위 품목\n{rows}"
+
+    # ── 전사 현황 ────────────────────────────────────────────
     if any(k in t for k in ['전체', '요약', '현황', '전사', '총']):
         cats = '\n'.join(
             f"  {cat}: {d['wh']:,}개 · ₩{d['val_man']:,}만 · {d['daily']}개/일"
             for cat, d in sorted(inv['cat_map'].items(), key=lambda x: -x[1]['val_man'])
         )
+        d2z = inv['days_to_zero']
+        pace = f"D-{d2z}일 소진 예상" if d2z < 999 else "소진 속도 미미"
         return (f"📊 전사 재고 현황\n"
                 f"총 창고재고 {inv['total_wh']:,}개 · ₩{inv['total_val_man']:,}만\n\n"
                 f"카테고리별:\n{cats}\n\n"
-                f"26SS 소진율 {inv['rate26']}% / 시간 {inv['time_pct']}% 경과 (D-{inv['d_left']})")
+                f"26SS 잔여 ₩{inv['val26_man']:,}만 · {pace} (D-{inv['d_left']} 마감)")
 
-    # 26SS
-    if '26ss' in t or '26 ss' in t or '26시즌' in t:
-        s = inv['season_map'].get('26SS', {})
-        gap = inv['time_pct'] - inv['rate26']
-        gap_str = f"{gap}%p 지연" if gap > 0 else f"{abs(gap)}%p 선행"
-        return (f"📅 26SS 시즌 현황\n"
-                f"재고 {s.get('wh',0):,}개 · ₩{s.get('val_man',0):,}만\n"
-                f"소진율 {inv['rate26']}% vs 시간 {inv['time_pct']}% → {gap_str}\n"
-                f"마감까지 D-{inv['d_left']} (8/31)")
-
-    # 25FW
-    if '25fw' in t or '25 fw' in t or '역시즌' in t:
-        s = inv['season_map'].get('25FW', {})
-        return (f"❄️ 25FW 역시즌 재고\n"
-                f"재고 {s.get('wh',0):,}개 · ₩{s.get('val_man',0):,}만\n"
-                f"일평균 소진 {s.get('daily',0)}개/일")
-
-    # 텐트
-    if '텐트' in t:
-        d = inv['cat_map'].get('텐트', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '텐트'][:5]
-        lines = '\n'.join(f"  · {l['line']} ({l['season']}) {l['wh']:,}개 ₩{round(l['val']/10000):,}만" for l in tops)
-        return (f"⛺ 텐트 재고\n"
-                f"총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n"
-                f"재고액 상위:\n{lines}")
-
-    # 어패럴
-    if '어패럴' in t or '의류' in t or '옷' in t:
-        d = inv['cat_map'].get('어패럴', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '어패럴'][:5]
-        lines = '\n'.join(f"  · {l['line']} ({l['season']}) {l['wh']:,}개 ₩{round(l['val']/10000):,}만" for l in tops)
-        return (f"👕 어패럴 재고\n"
-                f"총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n"
-                f"재고액 상위:\n{lines}")
-
-    # 기어
-    if '기어' in t or 'gear' in t:
-        d = inv['cat_map'].get('기어', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '기어'][:5]
-        lines = '\n'.join(f"  · {l['line']} ({l['season']}) {l['wh']:,}개" for l in tops)
-        return (f"🎒 기어 재고\n"
-                f"총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n"
-                f"재고액 상위:\n{lines}")
-
-    # 많이 팔린 / 소진 빠른
-    if any(k in t for k in ['많이 팔', '판매', '소진 빠', '잘 팔', '잘팔']):
-        tops = inv['top_sold'][:7]
-        lines = '\n'.join(
-            f"  {i+1}. {l['line']} ({l['season']}) — {l['daily']}개/일 · 재고 {l['wh']:,}개"
-            for i, l in enumerate(tops)
-        )
-        return f"🔥 일평균 소진 상위 품목 (최근 14일)\n{lines}"
-
-    # 재고 많은
-    if any(k in t for k in ['재고 많', '많은 재고', '남은 재고', '쌓인']):
-        tops = inv['top_lines'][:7]
-        lines = '\n'.join(
-            f"  {i+1}. {l['line']} ({l['season']}) — ₩{round(l['val']/10000):,}만 · {l['wh']:,}개"
-            for i, l in enumerate(tops)
-        )
-        return f"📦 재고액 상위 품목\n{lines}"
-
-    # 소진율 / D-day
-    if any(k in t for k in ['소진율', 'd-', 'd남', '마감', '몇일']):
-        gap = inv['time_pct'] - inv['rate26']
-        gap_str = f"{gap}%p 지연" if gap > 0 else f"{abs(gap)}%p 선행"
-        return (f"📅 26SS 소진율 {inv['rate26']}% (시간 {inv['time_pct']}% 경과)\n"
-                f"→ {gap_str} · D-{inv['d_left']} (8/31 마감)")
-
-    # 기본
-    return (f"아래 질문에 답할 수 있어요:\n"
-            f"• 전체/전사 현황\n"
-            f"• 텐트 / 어패럴 / 기어 재고\n"
-            f"• 26SS / 25FW 현황\n"
-            f"• 많이 팔린 품목\n"
-            f"• 재고 많은 품목\n"
-            f"• 소진율 / 마감 D-day")
+    # ── 기본 안내 ────────────────────────────────────────────
+    return ("질문 예시:\n"
+            "• 이지팝 TC 재고 현황\n"
+            "• 스태고 돔텐트 재고\n"
+            "• 텐트 / 어패럴 / 기어 전체\n"
+            "• 26SS 현황\n"
+            "• 많이 팔린 품목\n"
+            "• 재고 많은 품목")
 
 def slack_reply(channel, thread_ts, text):
     payload = json.dumps({'channel': channel, 'thread_ts': thread_ts, 'text': text}).encode()
