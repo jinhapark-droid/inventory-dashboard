@@ -10,11 +10,11 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-SLACK_BOT_TOKEN     = os.environ['SLACK_BOT_TOKEN']
+SLACK_BOT_TOKEN      = os.environ['SLACK_BOT_TOKEN']
 SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
+ANTHROPIC_API_KEY    = os.environ['ANTHROPIC_API_KEY']
 SHEET_ID  = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0'
 GID_MAIN  = '1461767551'
-GID_RATE  = '1388188128'
 
 processed_events = set()
 
@@ -125,118 +125,71 @@ def get_inventory():
         'span': span,
     }
 
-def search_lines(text, line_map):
-    """질문에서 품목명 키워드 추출해 line_map 검색"""
-    # 불용어 제거
-    stopwords = {'재고', '현황', '알려줘', '알려', '줘', '얼마', '몇', '개', '수량',
-                 '추이', '판매', '소진', '속도', '빠른', '많은', '남은', '이번주', '지난',
-                 '7일간', '14일', '최근', '전체', '전사', '요약'}
-    words = [w for w in re.split(r'[\s\[\]()]+', text) if len(w) >= 2 and w not in stopwords]
-    if not words:
-        return []
-    results = []
-    for v in line_map.values():
-        name_lower = v['line'].lower()
-        if any(w.lower() in name_lower for w in words):
-            results.append(v)
-    return sorted(results, key=lambda x: -x['val'])
+def build_context(inv):
+    """재고 데이터를 Claude에게 넘길 텍스트로 변환"""
+    today = date.today()
+    lines = [
+        f"[기준일: {today.strftime('%Y-%m-%d')}]",
+        f"전사 합계: 창고재고 {inv['total_wh']:,}개 · 재고액 ₩{inv['total_val_man']:,}만",
+        "",
+        "■ 카테고리별 (창고재고 | 재고액 | 일평균소진)",
+    ]
+    for cat, d in sorted(inv['cat_map'].items(), key=lambda x: -x[1]['val_man']):
+        lines.append(f"  {cat}: {d['wh']:,}개 · ₩{d['val_man']:,}만 · {d['daily']}개/일")
+
+    lines += ["", "■ 시즌별"]
+    for season, d in sorted(inv['season_map'].items(), key=lambda x: -x[1]['val_man']):
+        lines.append(f"  {season}: {d['wh']:,}개 · ₩{d['val_man']:,}만 · {d['daily']}개/일")
+
+    d2z = inv['days_to_zero']
+    pace = f"현재 속도로 {d2z}일 후 소진 예상" if d2z < 999 else "소진 속도 미미"
+    lines += [
+        "",
+        f"■ 26SS 시즌 (마감 2026-08-31, D-{inv['d_left']})",
+        f"  잔여재고액 ₩{inv['val26_man']:,}만 · 일평균 ₩{inv['daily26_val']}만 소진",
+        f"  {pace} ({'마감 전 소진 불가' if d2z > inv['d_left'] else '마감 전 소진 가능'})",
+    ]
+
+    lines += ["", "■ 품목별 재고 (라인명 | 시즌 | 카테고리 | 창고재고 | 재고액 | 일평균소진)"]
+    for v in sorted(inv['line_map'].values(), key=lambda x: -x['val']):
+        lines.append(
+            f"  {v['line']} | {v['season']} | {v['cat']} | "
+            f"{int(v['wh'])}개 | ₩{round(v['val']/10000)}만 | {v['daily']}개/일"
+        )
+
+    return '\n'.join(lines)
+
+def call_claude(question, context):
+    system = (
+        "당신은 아웃도어 브랜드 '어반사이드'의 실시간 재고 현황을 답변하는 AI 어시스턴트입니다.\n"
+        "아래 재고 데이터를 기반으로 질문에 간결하고 정확하게 한국어로 답변하세요.\n"
+        "- 숫자는 데이터 그대로 사용하고 추측하지 마세요.\n"
+        "- 답변은 5줄 이내로 핵심만 말하세요.\n"
+        "- 재고 관련 없는 질문에는 '재고 관련 질문만 답변할 수 있어요'라고 답하세요.\n\n"
+        f"=== 현재 재고 데이터 ===\n{context}"
+    )
+    payload = json.dumps({
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 400,
+        "system": system,
+        "messages": [{"role": "user", "content": question}]
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.loads(r.read())
+    return data["content"][0]["text"]
 
 def answer(text, inv):
-    t = text.lower()
-    line_map = inv['line_map']
-
-    # ── 특정 품목명 검색 (최우선) ──────────────────────────────
-    matched = search_lines(text, line_map)
-    # 카테고리/시즌 키워드가 아닌 경우에만 품목 검색 결과 사용
-    generic_keywords = {'전체', '전사', '요약', '현황', '총', '텐트', '어패럴', '의류', '기어',
-                        '많이', '잘팔', '재고많', '소진율', '마감', '26ss', '25fw', '역시즌'}
-    is_generic = any(k in t for k in generic_keywords)
-
-    if matched and not is_generic:
-        if len(matched) == 1:
-            l = matched[0]
-            daily = l['daily']
-            days_left = round(l['wh'] / daily) if daily > 0 else None
-            days_str = f" · 현재 속도로 약 {days_left}일치 재고" if days_left else ""
-            return (f"📦 {l['line']} ({l['season']}) [{l['cat']}]\n"
-                    f"창고재고 {int(l['wh']):,}개 · ₩{round(l['val']/10000):,}만\n"
-                    f"최근 14일 일평균 {daily}개/일{days_str}")
-        else:
-            lines = '\n'.join(
-                f"· {l['line']} ({l['season']}) — {int(l['wh']):,}개 · ₩{round(l['val']/10000):,}만 · {l['daily']}개/일"
-                for l in matched[:7]
-            )
-            total_wh = sum(l['wh'] for l in matched)
-            total_val = sum(l['val'] for l in matched)
-            return (f"🔍 검색 결과 ({len(matched)}개 라인)\n"
-                    f"합계 {int(total_wh):,}개 · ₩{round(total_val/10000):,}만\n\n"
-                    f"{lines}")
-
-    # ── 카테고리별 ────────────────────────────────────────────
-    if '텐트' in t and not any(k in t for k in ['전체', '전사']):
-        d = inv['cat_map'].get('텐트', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '텐트'][:5]
-        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
-        return (f"⛺ 텐트 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
-
-    if any(k in t for k in ['어패럴', '의류', '옷']):
-        d = inv['cat_map'].get('어패럴', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '어패럴'][:5]
-        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
-        return (f"👕 어패럴 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
-
-    if any(k in t for k in ['기어', 'gear']):
-        d = inv['cat_map'].get('기어', {})
-        tops = [l for l in inv['top_lines'] if l['cat'] == '기어'][:5]
-        rows = '\n'.join(f"  · {l['line']} ({l['season']}) {int(l['wh']):,}개 ₩{round(l['val']/10000):,}만 · {l['daily']}개/일" for l in tops)
-        return (f"🎒 기어 재고\n총 {d.get('wh',0):,}개 · ₩{d.get('val_man',0):,}만 · {d.get('daily',0)}개/일\n\n재고액 상위:\n{rows}")
-
-    # ── 시즌별 ───────────────────────────────────────────────
-    if '26ss' in t or '26시즌' in t or '26 ss' in t:
-        s = inv['season_map'].get('26SS', {})
-        d2z = inv['days_to_zero']
-        pace = f"현재 속도로 D-{d2z}일 소진 예상 ({'마감 전 소진 불가' if d2z > inv['d_left'] else '마감 전 소진 가능'})"
-        return (f"📅 26SS 시즌 현황 (D-{inv['d_left']}, 마감 8/31)\n"
-                f"잔여재고 {s.get('wh',0):,}개 · ₩{inv['val26_man']:,}만\n"
-                f"일평균 소진 ₩{inv['daily26_val']}만 · {pace}")
-
-    if '25fw' in t or '역시즌' in t or '25 fw' in t:
-        s = inv['season_map'].get('25FW', {})
-        return (f"❄️ 25FW 역시즌 재고\n"
-                f"재고 {s.get('wh',0):,}개 · ₩{s.get('val_man',0):,}만 · {s.get('daily',0)}개/일")
-
-    # ── 판매 / 소진 랭킹 ─────────────────────────────────────
-    if any(k in t for k in ['많이 팔', '잘 팔', '잘팔', '소진 빠', '판매 순', '판매순']):
-        tops = inv['top_sold'][:7]
-        rows = '\n'.join(f"  {i+1}. {l['line']} ({l['season']}) — {l['daily']}개/일 · 재고 {int(l['wh']):,}개" for i, l in enumerate(tops))
-        return f"🔥 일평균 소진 상위 품목 (최근 14일)\n{rows}"
-
-    if any(k in t for k in ['재고 많', '많은 재고', '남은 재고', '쌓인', '고재고']):
-        tops = inv['top_lines'][:7]
-        rows = '\n'.join(f"  {i+1}. {l['line']} ({l['season']}) — ₩{round(l['val']/10000):,}만 · {int(l['wh']):,}개" for i, l in enumerate(tops))
-        return f"📦 재고액 상위 품목\n{rows}"
-
-    # ── 전사 현황 ────────────────────────────────────────────
-    if any(k in t for k in ['전체', '요약', '현황', '전사', '총']):
-        cats = '\n'.join(
-            f"  {cat}: {d['wh']:,}개 · ₩{d['val_man']:,}만 · {d['daily']}개/일"
-            for cat, d in sorted(inv['cat_map'].items(), key=lambda x: -x[1]['val_man'])
-        )
-        d2z = inv['days_to_zero']
-        pace = f"D-{d2z}일 소진 예상" if d2z < 999 else "소진 속도 미미"
-        return (f"📊 전사 재고 현황\n"
-                f"총 창고재고 {inv['total_wh']:,}개 · ₩{inv['total_val_man']:,}만\n\n"
-                f"카테고리별:\n{cats}\n\n"
-                f"26SS 잔여 ₩{inv['val26_man']:,}만 · {pace} (D-{inv['d_left']} 마감)")
-
-    # ── 기본 안내 ────────────────────────────────────────────
-    return ("질문 예시:\n"
-            "• 이지팝 TC 재고 현황\n"
-            "• 스태고 돔텐트 재고\n"
-            "• 텐트 / 어패럴 / 기어 전체\n"
-            "• 26SS 현황\n"
-            "• 많이 팔린 품목\n"
-            "• 재고 많은 품목")
+    context = build_context(inv)
+    return call_claude(text, context)
 
 def slack_reply(channel, thread_ts, text):
     payload = json.dumps({'channel': channel, 'thread_ts': thread_ts, 'text': text}).encode()
