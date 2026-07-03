@@ -222,6 +222,18 @@ def slack_reply(channel, thread_ts, text):
     with urllib.request.urlopen(req) as r:
         return json.loads(r.read())
 
+def is_bot_parent(channel, thread_ts):
+    url = (f'https://slack.com/api/conversations.replies'
+           f'?channel={channel}&ts={thread_ts}&limit=1&inclusive=true')
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {SLACK_BOT_TOKEN}'})
+    with urllib.request.urlopen(req) as r:
+        data = json.loads(r.read())
+    messages = data.get('messages', [])
+    if not messages:
+        return False
+    parent = messages[0]
+    return bool(parent.get('bot_id') or parent.get('subtype') == 'bot_message')
+
 @app.route('/slack/events', methods=['POST'])
 def slack_events():
     if not verify_slack(request):
@@ -249,6 +261,9 @@ def slack_events():
     text    = event.get('text', '').strip()
     channel = event.get('channel', '')
     if not text:
+        return jsonify({'ok': True})
+
+    if not is_bot_parent(channel, thread_ts):
         return jsonify({'ok': True})
 
     try:
