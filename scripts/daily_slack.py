@@ -5,7 +5,6 @@ from datetime import date, datetime
 
 SHEET_ID = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0'
 GID_MAIN = '1461767551'
-GID_RATE = '1388188128'
 SLACK_CHANNEL = 'C03B2KKBVT6'  # #1_사업개발팀
 
 import os
@@ -45,6 +44,11 @@ total_14 = 0
 cat_map = {}
 order_cat_map = {}   # 접수건 카테고리별 합계
 preorder_items = []  # 재고 0인데 접수건 있는 품목
+line_map = {}        # 품목별 재고/판매 (소진 임박 계산용)
+
+# 26SS 소진율 메인시트 직접 계산
+ss26_initial = 0
+ss26_current = 0
 
 for r in rows:
     if len(r) <= 14: continue
@@ -54,6 +58,7 @@ for r in rows:
     price = num(r[5])
     cat   = s(r[6]) or '기타'
     line  = s(r[9]) or name
+    season = s(r[8])
     order = num(r[13]) if len(r) > 13 else 0  # 접수건 (컬럼 N)
     total_stock_val += wh * price
     total_wh        += wh
@@ -76,6 +81,22 @@ for r in rows:
         last_val2 = num(r[valid_date_cols[-1]]) if valid_date_cols[-1] < len(r) else 0
         total_14 += max(0, first_val - last_val2)
 
+        # 26SS 소진율: 초기재고(최초날짜) vs 현재재고
+        if season == '26SS' and not SPECIAL.search(name):
+            ss26_initial += first_val
+            ss26_current += last_val2
+
+        # 품목별 소진 속도 (소진 임박 / 부진 고재고 계산용)
+        sold14_item = max(0, first_val - last_val2)
+        daily_item = sold14_item / max(len(valid_date_cols) - 1, 1)
+        if wh > 0 and cat in ('어패럴', '텐트', '기어'):
+            key = f'{line}||{cat}'
+            if key not in line_map:
+                line_map[key] = {'line': line, 'cat': cat, 'wh': 0, 'daily': 0, 'val': 0}
+            line_map[key]['wh']    += wh
+            line_map[key]['daily'] += daily_item
+            line_map[key]['val']   += wh * price
+
     if cat in ('어패럴', '기어', '텐트'):
         if cat not in cat_map:
             cat_map[cat] = {'sold14': 0, 'wh': 0, 'stock_val': 0}
@@ -87,39 +108,42 @@ span_days = max(len(valid_date_cols) - 1, 1)
 daily_avg = round(total_14 / span_days)
 diff_pct  = round((today_sold - daily_avg) / daily_avg * 100) if daily_avg > 0 else 0
 
-# 소진율 시트
-rate_data = fetch_gviz(GID_RATE)
-rate_rows = rate_data['table']['rows'][1:]
-tot26 = wh26_rate = 0
-for r in rate_rows:
-    c = r['c']
-    if len(c) > 2 and s(c[2]) == '26SS':
-        tot26     += num(c[5])
-        wh26_rate += num(c[7])
+# 26SS 현황 (메인시트 기반)
+val26_wh   = 0
+val26_sold_14d = 0
+wh26_cnt   = 0
+for r in rows:
+    if len(r) <= 14: continue
+    if s(r[8]) != '26SS' or SPECIAL.search(s(r[0])): continue
+    wh    = num(r[14])
+    price = num(r[5])
+    val26_wh += wh * price
+    wh26_cnt += wh
+    if len(valid_date_cols) >= 2:
+        fv = num(r[valid_date_cols[0]]) if valid_date_cols[0] < len(r) else 0
+        lv = num(r[valid_date_cols[-1]]) if valid_date_cols[-1] < len(r) else 0
+        val26_sold_14d += max(0, fv - lv) * price
 
-rate26 = round((tot26 - wh26_rate) / tot26 * 100) if tot26 > 0 else 0
-
-# 26SS 창고재고액 (메인시트)
-val26 = sum(num(r[14]) * num(r[5]) for r in rows if len(r) > 14 and s(r[8]) == '26SS' and not SPECIAL.search(s(r[0])))
-val26_man = round(val26 / 10000)
+val26_man      = round(val26_wh / 10000)
+val26_sold_man = round(val26_sold_14d / 10000)
+daily26_val    = round(val26_sold_14d / span_days / 10000, 1)  # 26SS 일평균 매출액(만원)
+days_to_zero   = round(val26_wh / (val26_sold_14d / span_days)) if val26_sold_14d > 0 else 999
 
 # 시간 진행률
-today = date.today()
-start = date(2026, 4, 1)
-end   = date(2026, 8, 31)
+today    = date.today()
+start    = date(2026, 4, 1)
+end      = date(2026, 8, 31)
 time_pct = round((today - start).days / (end - start).days * 100)
-d_left    = (end - today).days
-gap       = time_pct - rate26
+d_left   = (end - today).days
 
 # 메시지 조합
 cats_sorted = sorted(cat_map.items(), key=lambda x: -x[1]['sold14'])
 cat_lines = ''
 for cat, d in cats_sorted:
     daily = round(d['sold14'] / span_days, 1)
-    cat_lines += f"\n{cat} {daily}개/일 — 재고 {d['wh']:,}개 · ₩{round(d['stock_val']/10000):,}만"
+    cat_lines += f"\n{cat} {daily}개/일 — 재고 {int(d['wh']):,}개 · ₩{round(d['stock_val']/10000):,}만"
 
 diff_str = f"+{diff_pct}%" if diff_pct >= 0 else f"{diff_pct}%"
-gap_str  = f"{gap}%p 지연" if gap > 0 else f"{abs(gap)}%p 선행"
 
 # 어제 카테고리별 판매 집계
 cat_sold_yday = {}
@@ -152,14 +176,44 @@ yday_cat_lines = ''
 for cat in ['어패럴', '텐트', '기어']:
     d = cat_sold_yday.get(cat)
     if d and d['qty'] > 0:
-        yday_cat_lines += f"\n{cat} {d['qty']}개 — ₩{round(d['val']/10000, 1)}만"
+        yday_cat_lines += f"\n{cat} {int(d['qty'])}개 — ₩{round(d['val']/10000, 1)}만"
 
 # 판매 상위 품목 (수량 기준 top 5)
 top_lines_yday = sorted(line_sold_yday.items(), key=lambda x: -x[1]['qty'])[:5]
 top_lines_str = '\n'.join(
-    f"· {line} {d['qty']}개 (₩{round(d['val']/10000, 1)}만)"
+    f"· {line} {int(d['qty'])}개 (₩{round(d['val']/10000, 1)}만)"
     for line, d in top_lines_yday
 )
+
+# 소진 임박 품목 (현재 속도로 30일 내 소진 예상, 재고액 500만 이상)
+stockout_items = []
+for key, d in line_map.items():
+    if d['daily'] > 0 and d['val'] >= 5_000_000:
+        days_left = d['wh'] / d['daily']
+        if days_left <= 30:
+            stockout_items.append((d['line'], d['cat'], int(d['wh']), round(days_left), round(d['val']/10000)))
+stockout_items = sorted(stockout_items, key=lambda x: x[3])[:5]
+
+stockout_section = ''
+if stockout_items:
+    for line, cat, wh, days, val_man in stockout_items:
+        stockout_section += f"\n⏰ {line} [{cat}] — {wh}개 남음 · D-{days}일 소진 예상 (₩{val_man:,}만)"
+else:
+    stockout_section = '\n해당 없음'
+
+# 부진 고재고 품목 (재고액 1000만 이상인데 14일간 판매 0)
+slow_items = []
+for key, d in line_map.items():
+    if d['daily'] == 0 and d['val'] >= 10_000_000:
+        slow_items.append((d['line'], d['cat'], int(d['wh']), round(d['val']/10000)))
+slow_items = sorted(slow_items, key=lambda x: -x[3])[:5]
+
+slow_section = ''
+if slow_items:
+    for line, cat, wh, val_man in slow_items:
+        slow_section += f"\n🧊 {line} [{cat}] — {wh:,}개 · ₩{val_man:,}만 (14일 판매 0)"
+else:
+    slow_section = '\n해당 없음'
 
 # 변동사항 감지 (입고 / 신규 품목)
 restocked_items = []
@@ -176,10 +230,8 @@ if len(valid_date_cols) >= 2:
         prev_v = num(r[prev_col]) if prev_col < len(r) else 0
         last_v = num(r[last_col]) if last_col < len(r) else 0
         diff   = last_v - prev_v
-        # 입고: 재고가 10개 이상 늘어난 경우
         if diff >= 10:
             restocked_items.append((line, int(diff)))
-        # 신규: 14일 창 내 모든 이전 날짜가 0/None이고 최근에 재고 생김
         if last_v > 0:
             all_prev_zero = all(
                 (num(r[i]) if i < len(r) and r[i] and r[i].get('v') is not None else 0) == 0
@@ -189,7 +241,11 @@ if len(valid_date_cols) >= 2:
                 new_items.append((line, int(last_v)))
 
 restocked_items = sorted(restocked_items, key=lambda x: -x[1])[:5]
-new_items = new_items[:5]
+# 신규 품목 라인명 기준 중복 제거
+new_merged = {}
+for line, qty in new_items:
+    new_merged[line] = new_merged.get(line, 0) + qty
+new_items = sorted(new_merged.items(), key=lambda x: -x[1])[:5]
 
 changes_lines = ''
 for line, qty in restocked_items:
@@ -199,30 +255,26 @@ for line, qty in new_items:
 if not changes_lines:
     changes_lines = '\n변동사항 없음'
 
-# 인사이트 코멘트
-app_qty  = cat_sold_yday.get('어패럴', {}).get('qty', 0)
-tent_qty = cat_sold_yday.get('텐트', {}).get('qty', 0)
-app_val2 = round(cat_sold_yday.get('어패럴', {}).get('val', 0) / 10000, 1)
-tent_val2= round(cat_sold_yday.get('텐트', {}).get('val', 0) / 10000, 1)
-
-if tent_qty > 0 and tent_val2 >= app_val2:
-    yday_comment = f"수량은 어패럴({app_qty}개)이 많았지만 텐트({tent_qty}개)가 단가 우위로 매출 비슷. 텐트 단가 레버리지 주목."
-elif app_qty > tent_qty * 3:
-    yday_comment = f"어패럴이 수량 기준 전체의 {round(app_qty/(app_qty+tent_qty+1)*100)}% 차지. 텐트는 {tent_qty}개로 부진 — 7월 프로모션 연계 필요."
-else:
-    yday_comment = f"어패럴 {app_qty}개·텐트 {tent_qty}개 고른 판매. 26SS 마감까지 {d_left}일, 소진율 관리 중요한 시점."
-
+# 인사이트
 tent_stock_val = round(cat_map.get('텐트', {}).get('stock_val', 0) / 10000)
 app_stock_val  = round(cat_map.get('어패럴', {}).get('stock_val', 0) / 10000)
 tent_daily_spd = round(cat_map.get('텐트', {}).get('sold14', 0) / span_days, 1)
+if days_to_zero < 30:
+    ss26_pace = f"⚠️ 현재 소진 속도 유지 시 {days_to_zero}일 내 소진 완료 예상"
+elif days_to_zero < d_left:
+    ss26_pace = f"현재 속도로 {days_to_zero}일 내 소진 — 시즌 마감({d_left}일 남음) 전 여유 있음"
+else:
+    ss26_pace = f"현재 속도로 마감 전 소진 불가 (예상 소진일 D-{days_to_zero}, 마감 D-{d_left})"
+
 insight = (
-    f"텐트 카테고리 재고액(₩{tent_stock_val:,}만)이 어패럴(₩{app_stock_val:,}만)과 비슷한 수준인데 "
+    f"텐트 재고액(₩{tent_stock_val:,}만)이 어패럴(₩{app_stock_val:,}만)과 비슷한 수준인데 "
     f"소진 속도는 {tent_daily_spd}개/일로 절반에 불과해요. "
-    f"26SS 시즌은 마감까지 {d_left}일 남은 상황에서 소진율이 시간 대비 {abs(gap)}%p "
-    f"{'뒤처지고' if gap > 0 else '앞서고'} 있어 7월 프로모션 효과가 중요한 시점이에요."
+    f"26SS 잔여재고 ₩{val26_man:,}만 (일평균 ₩{daily26_val}만 소진) — {ss26_pace}."
 )
 if diff_pct < -20:
     insight += f" 오늘 판매량({int(today_sold)}개)은 최근 평균 대비 {abs(diff_pct)}% 저조했어요."
+elif diff_pct >= 20:
+    insight += f" 오늘 판매량({int(today_sold)}개)은 최근 평균 대비 {diff_pct}% 호조예요."
 
 # 접수건 섹션
 total_orders = sum(order_cat_map.values())
@@ -235,7 +287,6 @@ other_orders = sum(v for k, v in order_cat_map.items() if k not in ('어패럴',
 if other_orders > 0:
     order_section += f"\n기타 {int(other_orders)}건"
 if preorder_items:
-    # 라인명 기준으로 합산
     preorder_merged = {}
     for line, qty, cat in preorder_items:
         key = (line, cat)
@@ -256,7 +307,8 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 📦 카테고리별 소진 속도 (최근 14일){cat_lines}
 
 📅 26SS 시즌 현황 (D-{d_left}, 마감 8/31)
-소진율 {rate26}% vs 시간 {time_pct}% 경과 → {gap_str} · 잔여 재고액 ₩{val26_man:,}만
+잔여 재고액 ₩{val26_man:,}만 · 시간 {time_pct}% 경과
+일평균 소진 ₩{daily26_val}만 · {ss26_pace}
 
 💡 인사이트
 {insight}
@@ -267,6 +319,10 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 {top_lines_str}
 
 📬 금일 출고 접수{order_section}
+
+⏱ 재고 소진 임박 (30일 내, 재고액 500만↑){stockout_section}
+
+🧊 부진 고재고 품목 (14일 판매 0, 재고액 1000만↑){slow_section}
 
 🔔 변동사항{changes_lines}
 
