@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 SLACK_BOT_TOKEN      = os.environ['SLACK_BOT_TOKEN']
 SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
-ANTHROPIC_API_KEY    = os.environ['ANTHROPIC_API_KEY']
+GEMINI_API_KEY       = os.environ['GEMINI_API_KEY']
 SHEET_ID  = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0'
 GID_MAIN  = '1461767551'
 
@@ -159,7 +159,7 @@ def build_context(inv):
 
     return '\n'.join(lines)
 
-def call_claude(question, context):
+def call_gemini(question, context):
     system = (
         "당신은 아웃도어 브랜드 '어반사이드'의 실시간 재고 현황을 답변하는 AI 어시스턴트입니다.\n"
         "아래 재고 데이터를 기반으로 질문에 간결하고 정확하게 한국어로 답변하세요.\n"
@@ -168,28 +168,20 @@ def call_claude(question, context):
         "- 재고 관련 없는 질문에는 '재고 관련 질문만 답변할 수 있어요'라고 답하세요.\n\n"
         f"=== 현재 재고 데이터 ===\n{context}"
     )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     payload = json.dumps({
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 400,
-        "system": system,
-        "messages": [{"role": "user", "content": question}]
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"parts": [{"text": question}]}],
+        "generationConfig": {"maxOutputTokens": 400, "temperature": 0.2}
     }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-    )
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = json.loads(r.read())
-    return data["content"][0]["text"]
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 def answer(text, inv):
     context = build_context(inv)
-    return call_claude(text, context)
+    return call_gemini(text, context)
 
 def slack_reply(channel, thread_ts, text):
     payload = json.dumps({'channel': channel, 'thread_ts': thread_ts, 'text': text}).encode()
