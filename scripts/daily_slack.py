@@ -42,8 +42,12 @@ today_sold = 0
 total_14 = 0
 cat_map = {}          # 카테고리별 재고
 app_season_map = {}   # 어패럴 시즌별 재고
-line_sold14 = {}      # 라인명별 14일 판매수량 (소진 활발 top5)
-preorder_items = []   # 재고 0 + 접수건 있는 품목
+line_sold7 = {}       # 라인명별 7일 실판매수량
+line_order = {}       # 라인명별 사전구매(접수건, wh=0) 수량
+preorder_by_line = {} # 사전구매 재고: 라인명 → [(상품명, qty), ...]
+
+# 7일 기준 컬럼: 마지막 8개 (7일 span)
+seven_cols = valid_date_cols[-8:] if len(valid_date_cols) >= 8 else valid_date_cols
 
 for r in rows:
     if len(r) <= 14: continue
@@ -59,17 +63,13 @@ for r in rows:
     total_stock_val += wh * price
     total_wh        += wh
 
-    # 접수건 있고 창고재고 0인 품목 → 사전구매 재고
-    if order > 0 and wh == 0:
-        preorder_items.append((line, int(order), season, cat))
-
     # 오늘 판매 (전날 대비)
     if len(valid_date_cols) >= 2:
         prev_val = num(r[valid_date_cols[-2]]) if valid_date_cols[-2] < len(r) else 0
         last_val = num(r[valid_date_cols[-1]]) if valid_date_cols[-1] < len(r) else 0
         today_sold += max(0, prev_val - last_val)
 
-    # 14일 판매
+    # 14일 판매 (일평균 계산용)
     sold14 = 0
     if len(valid_date_cols) >= 1:
         first_val = num(r[valid_date_cols[0]])  if valid_date_cols[0]  < len(r) else 0
@@ -91,9 +91,27 @@ for r in rows:
         app_season_map[season]['wh']        += wh
         app_season_map[season]['stock_val'] += wh * price
 
-    # 라인별 14일 판매수량
-    if sold14 > 0 and cat in ('어패럴', '기어', '텐트'):
-        line_sold14[line] = line_sold14.get(line, 0) + sold14
+    if cat not in ('어패럴', '기어', '텐트'):
+        continue
+
+    # 실판매: 7일간 창고재고 감소 (창고재고 있는 품목)
+    if wh > 0 and len(seven_cols) >= 2:
+        first7 = num(r[seven_cols[0]])  if seven_cols[0]  < len(r) else 0
+        last7  = num(r[seven_cols[-1]]) if seven_cols[-1] < len(r) else 0
+        sold7  = max(0, first7 - last7)
+        if sold7 > 0:
+            line_sold7[line] = line_sold7.get(line, 0) + sold7
+
+    # 사전구매 증가: wh=0이고 접수건 있는 품목
+    if wh == 0 and order > 0:
+        line_order[line] = line_order.get(line, 0) + int(order)
+        # 하위 품목 상세 (사전구매 재고 섹션용)
+        sub_name = name.replace(line, '').strip() or '본품'
+        if not sub_name:
+            sub_name = '본품'
+        if line not in preorder_by_line:
+            preorder_by_line[line] = []
+        preorder_by_line[line].append((sub_name, int(order)))
 
 span_days = max(len(valid_date_cols) - 1, 1)
 daily_avg = round(total_14 / span_days)
@@ -121,21 +139,44 @@ for season, d in sorted(app_season_map.items(), key=lambda x: x[0]):
     if season not in SEASON_ORDER and d['wh'] > 0:
         season_lines += f"\n{season} {int(d['wh']):,}개 · ₩{round(d['stock_val']/10000):,}만"
 
-# 소진 활발 품목 top5 (14일 판매수량 기준)
-top_sold = sorted(line_sold14.items(), key=lambda x: -x[1])[:5]
-top_sold_str = ''
-for i, (line, qty) in enumerate(top_sold, 1):
-    top_sold_str += f"\n{i}. {line} {int(qty)}개"
+# 소진 활발 품목 top5 (7일 기준, 실판매 + 사전구매 혼합)
+activity = []
+for line, qty in line_sold7.items():
+    activity.append((line, qty, '실판매'))
+for line, qty in line_order.items():
+    if line not in line_sold7:  # 실판매에 없는 경우만 사전구매로 추가
+        activity.append((line, qty, '사전구매 증가'))
+    else:
+        # 둘 다 있으면 사전구매 수량도 별도 항목으로
+        activity.append((line, qty, '사전구매 증가'))
 
-# 사전 구매 재고 (라인명+시즌 기준 합산)
-preorder_merged = {}
-for line, qty, season, cat in preorder_items:
-    key = (line, season)
-    preorder_merged[key] = preorder_merged.get(key, 0) + qty
+activity_sorted = sorted(activity, key=lambda x: -x[1])
+# 라인명 중복 제거 (같은 라인이 실판매+사전구매 둘 다 있으면 큰 쪽 우선)
+seen_lines = {}
+for line, qty, kind in activity_sorted:
+    if line not in seen_lines:
+        seen_lines[line] = (qty, kind)
+top5 = sorted(seen_lines.items(), key=lambda x: -x[1][0])[:5]
+
+top_sold_str = ''
+for i, (line, (qty, kind)) in enumerate(top5, 1):
+    if kind == '사전구매 증가':
+        top_sold_str += f"\n{i}. {line} +{qty}개 ({kind})"
+    else:
+        top_sold_str += f"\n{i}. {line} {qty}개 ({kind})"
+
+# 사전구매 재고 (라인명별 합산 + 하위 항목)
 preorder_lines = ''
-for (line, season), qty in sorted(preorder_merged.items(), key=lambda x: -x[1])[:5]:
-    label = f"{season} {line}" if season else line
-    preorder_lines += f"\n{label} {qty}개 발주 · 창고 미입고"
+preorder_summary = {
+    line: sum(q for _, q in items)
+    for line, items in preorder_by_line.items()
+}
+for line, total in sorted(preorder_summary.items(), key=lambda x: -x[1])[:5]:
+    preorder_lines += f"\n{line} {total}개 발주 · 창고 미입고"
+    items = sorted(preorder_by_line[line], key=lambda x: -x[1])
+    if len(items) > 1:
+        sub_str = ', '.join(f"{sn} {sq}개" for sn, sq in items)
+        preorder_lines += f"\nㄴ {sub_str}"
 if not preorder_lines:
     preorder_lines = '\n해당 없음'
 
@@ -149,7 +190,7 @@ message = f"""[재고 현황 업데이트] {today_str} 오후 7시
 
 👕 어패럴 시즌별 재고액{season_lines}
 
-🔥 소진 활발 품목 (최근 14일){top_sold_str}
+🔥 소진 활발 품목 (최근 7일){top_sold_str}
 
 📥 사전 구매 재고{preorder_lines}
 
