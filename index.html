@@ -420,10 +420,18 @@ mark { background: rgba(91,82,224,.2); color: var(--accent); border-radius: 2px;
     <div class="loading" id="lrate"><div class="spin"></div><span style="color:var(--muted)">데이터 불러오는 중…</span></div>
     <div id="crate" style="display:none">
 
+      <!-- 시즌 선택 탭 -->
+      <div class="sec" style="margin-bottom:12px">
+        <div class="sec-hdr">
+          <span class="sec-title">분석 시즌</span>
+          <div class="tgl" id="rateSeasonTabs"></div>
+        </div>
+      </div>
+
       <!-- 데이터 기준일 + AI 분석 -->
       <div class="sec" id="rateAnalysisSec" style="display:none">
         <div class="sec-hdr">
-          <span class="sec-title">AI 소진율 분석</span>
+          <span class="sec-title" id="rateAnalysisTitle">AI 소진율 분석</span>
           <span id="rateDateBadge" style="font-size:12px;color:var(--muted);background:var(--surface2);padding:3px 10px;border-radius:20px"></span>
         </div>
         <div id="rateAnalysis"></div>
@@ -529,6 +537,7 @@ let dates = [];          // [{serial, label}] for date columns
 let charts = {};
 let trendMode = 'product';
 let apparelMeta = {};    // SKU코드 → {total, orders, remaining, rate, line, season, name}
+let rateActiveSeason = '';
 
 // ─── Init ─────────────────────────────────────────────────
 async function init() {
@@ -1064,7 +1073,7 @@ function drawVelo() {
   const catItems = {}; // cat → [{ name, size, consumed, volume, stock, velocity, daysLeft }]
   rows.forEach(r => {
     const cat      = str(r, C.subcat) || str(r, C.cat) || '기타';
-    const consumed = num(r, firstCol) - num(r, lastCol);
+    const consumed = Math.max(0, num(r, firstCol) - num(r, lastCol));
     const vol      = consumed * num(r, C.price);
     const stock    = num(r, C.warehouse);
     if (!catItems[cat]) catItems[cat] = [];
@@ -1217,7 +1226,7 @@ const SEASON_STARTS = {
   '26SS': '2026-04-01',
   '26FW': '2026-10-01',
 };
-const CURRENT_SEASON = '26SS';
+const CURRENT_SEASON = '26FW';
 
 function drawSeasonProgress() {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -1225,9 +1234,9 @@ function drawSeasonProgress() {
   // 재고 있는 시즌만 표시 (현재 시즌 + 잔여 있는 이전 시즌)
   const activeSeasons = Object.keys(SEASON_DEADLINES)
     .filter(s => {
-      const hasStock = rows.some(r => str(r, C.season) === s && num(r, C.warehouse) > 0);
+      const hasActivity = rows.some(r => str(r, C.season) === s && (num(r, C.warehouse) > 0 || num(r, C.waiting) > 0));
       const notExpired = new Date(SEASON_DEADLINES[s]) >= today || s === CURRENT_SEASON;
-      return hasStock && notExpired;
+      return (hasActivity || s === CURRENT_SEASON) && notExpired;
     })
     .sort();
 
@@ -1251,11 +1260,19 @@ function drawSeasonProgress() {
     const rcTotal   = sRows.reduce((s,r) => s + num(r, C.receipt), 0);
     const stockVal  = sRows.reduce((s,r) => s + num(r, C.warehouse) * num(r, C.price), 0);
 
-    // 26SS: apparelMeta에서 총수량 가져오기
-    let prodTotal = 0, ratePct = null;
-    if (season === '26SS') {
-      prodTotal = Object.values(apparelMeta).filter(m => m.season === season).reduce((s,m) => s + m.total, 0);
-      if (prodTotal > 0) ratePct = Math.min(100, Math.round((prodTotal - whTotal) / prodTotal * 100));
+    // apparelMeta에서 시즌별 소진율 계산
+    let ratePct = null;
+    const seasonMeta = Object.values(apparelMeta).filter(m => m.season === season);
+    if (seasonMeta.length > 0) {
+      const totalProd   = seasonMeta.reduce((s,m) => s + m.total, 0);
+      const totalOrders = seasonMeta.reduce((s,m) => s + m.orders, 0);
+      if (totalProd > 0) {
+        // 26FW 등 사전구매 시즌: 주문수량/생산수량 (창고재고 기준 아님)
+        const isSalesSeason = whTotal > 0 && totalProd > 0;
+        ratePct = isSalesSeason
+          ? Math.min(100, Math.round((totalProd - whTotal) / totalProd * 100))
+          : Math.min(100, Math.round(totalOrders / totalProd * 100));
+      }
     }
 
     // 마감까지 남은 시간 상태
@@ -1800,10 +1817,12 @@ function buildRateLines() {
   return Object.values(lineMap);
 }
 
-function drawRateAnalysis(lines) {
+function drawRateAnalysis(lines, season) {
   const sec = document.getElementById('rateAnalysisSec');
-  if (!dates.length) { sec.style.display = 'none'; return; }
+  if (!dates.length || !season) { sec.style.display = 'none'; return; }
   sec.style.display = '';
+
+  document.getElementById('rateAnalysisTitle').textContent = `AI 소진율 분석 — ${season}`;
 
   // 데이터 기준일 표시
   const firstLabel = dates[0].label;
@@ -1811,14 +1830,17 @@ function drawRateAnalysis(lines) {
   document.getElementById('rateDateBadge').textContent = `📅 ${firstLabel} ~ ${lastLabel} 스냅샷 기준`;
 
   const today   = new Date(); today.setHours(0,0,0,0);
-  const rated   = lines.filter(l => l.rate !== null && l.season === '26SS');
-  if (!rated.length) { sec.style.display = 'none'; return; }
+  const rated   = lines.filter(l => l.rate !== null && l.season === season);
+  if (!rated.length) {
+    document.getElementById('rateAnalysis').innerHTML = `<div style="color:var(--muted);padding:16px">소진율 데이터 없음 — GID2 시트에 ${season} 데이터가 필요합니다.</div>`;
+    return;
+  }
 
   const avg     = rated.reduce((s,l) => s + l.rate, 0) / rated.length;
   const totalVal = rated.reduce((s,l) => s + l.stockVal, 0);
 
   // 시즌 마감
-  const deadline  = new Date(SEASON_DEADLINES['26SS'] || '2026-09-30');
+  const deadline  = new Date(SEASON_DEADLINES[season] || '2099-12-31');
   const daysLeft  = Math.round((deadline - today) / 86400000);
   const targetRate = 0.85;
   const gapNeeded  = Math.max(0, targetRate - avg);
@@ -1866,10 +1888,10 @@ function drawRateAnalysis(lines) {
   const trendDir = avg >= 0.5 ? '순항 중' : avg >= 0.35 ? '관리 필요' : '긴급 개입 필요';
   sections.push(`
     <div class="ai-section">
-      <div class="ai-section-title">📊 전사 소진율 현황 — 26SS</div>
+      <div class="ai-section-title">📊 전사 소진율 현황 — ${season}</div>
       <div class="ai-summary">
-        현재 26SS 전사 평균 소진율 <strong>${pct(avg)}</strong> (데이터 기준: ${firstLabel}→${lastLabel}, ${spanDays}일 추적).
-        시즌 마감(${deadline.getMonth()+1}/${deadline.getDate()})까지 <strong>D-${daysLeft}</strong> 남은 시점에서 목표 소진율 ${Math.round(targetRate*100)}% 달성까지
+        현재 ${season} 전사 평균 소진율 <strong>${pct(avg)}</strong> (데이터 기준: ${firstLabel}→${lastLabel}, ${spanDays}일 추적).
+        시즌 마감(${deadline.getMonth()+1}/${deadline.getDate()})까지 <strong>${daysLeft > 0 ? 'D-'+daysLeft : '마감 완료'}</strong> 남은 시점에서 목표 소진율 ${Math.round(targetRate*100)}% 달성까지
         <strong>+${Math.round(gapNeeded*100)}%p</strong> 추가 필요. 현 속도가 유지될 경우 일부 저소진 품목의 마감 잔류 리스크가 있습니다. 전략 등급: <strong>${trendDir}</strong>.
         ${t00.length > 0 ? `저소진(30% 미만) ${t00.length}개 품목의 잔여 재고액 합산 ${val(t00.reduce((s,l)=>s+l.stockVal,0))}이 자금 적체의 핵심입니다.` : ''}
       </div>
@@ -1998,14 +2020,28 @@ function renderRate() {
   const today = new Date(); today.setHours(0,0,0,0);
   const lines = buildRateLines();
 
+  // ── 시즌 탭 ──
+  const ratedSeasons = uniq(lines.filter(l => l.rate !== null).map(l => l.season)).sort();
+  // 데이터 없어도 현재 시즌과 기존 시즌 포함
+  const allRateSeasons = uniq([...ratedSeasons, ...Object.keys(SEASON_DEADLINES).filter(s => new Date(SEASON_DEADLINES[s]) >= new Date())]).sort();
+  if (!rateActiveSeason || !allRateSeasons.includes(rateActiveSeason)) {
+    rateActiveSeason = allRateSeasons.includes(CURRENT_SEASON) ? CURRENT_SEASON : (allRateSeasons[allRateSeasons.length - 1] || '');
+  }
+  const tabsEl = document.getElementById('rateSeasonTabs');
+  if (tabsEl) {
+    tabsEl.innerHTML = allRateSeasons.map(s =>
+      `<button class="tgl-btn${s === rateActiveSeason ? ' on' : ''}" onclick="setRateSeason('${s}')">${s}</button>`
+    ).join('');
+  }
+
   // ── KPI ──
-  const ratedLines = lines.filter(l => l.rate !== null);
+  const ratedLines = lines.filter(l => l.rate !== null && l.season === rateActiveSeason);
   const avg = ratedLines.length ? ratedLines.reduce((s,l) => s + l.rate, 0) / ratedLines.length : 0;
   const over80 = ratedLines.filter(l => l.rate >= 0.8).length;
   const under30 = ratedLines.filter(l => l.rate < 0.3).length;
-  const totalStockVal = lines.reduce((s,l) => s + l.stockVal, 0);
+  const totalStockVal = lines.filter(l => l.season === rateActiveSeason).reduce((s,l) => s + l.stockVal, 0);
   document.getElementById('rateKpi').innerHTML = kpiHTML([
-    { label: '26SS 평균 소진율', val: Math.round(avg*100) + '%', sub: `${ratedLines.length}개 품목`, color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
+    { label: `${rateActiveSeason} 평균 소진율`, val: Math.round(avg*100) + '%', sub: `${ratedLines.length}개 품목`, color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
     { label: '고소진 품목 (80%+)', val: over80 + '개', color: 'var(--green)' },
     { label: '저소진 품목 (30% 미만)', val: under30 + '개', sub: '주의 필요', color: 'var(--red)' },
     { label: '잔여 재고액 합계', val: '₩' + Math.round(totalStockVal/10000).toLocaleString() + '만', sub: '전 시즌', color: 'var(--orange)' },
@@ -2110,7 +2146,7 @@ function renderRate() {
     '<option value="">전체 시즌</option>' + seasons.map(s=>`<option>${s}</option>`).join('');
 
   window._rateLines = lines;
-  drawRateAnalysis(lines);
+  drawRateAnalysis(lines, rateActiveSeason);
   drawRateTable();
 }
 
@@ -2149,6 +2185,30 @@ function drawRateTable() {
       <td>${deadlineCell}</td>
     </tr>`;
   }).join('');
+}
+
+// ─── 소진율 시즌 전환 ────────────────────────────────────
+function setRateSeason(s) {
+  rateActiveSeason = s;
+  document.querySelectorAll('#rateSeasonTabs .tgl-btn').forEach(b => {
+    b.classList.toggle('on', b.textContent === s);
+  });
+  const lines = window._rateLines || [];
+
+  // KPI 갱신
+  const ratedLines = lines.filter(l => l.rate !== null && l.season === s);
+  const avg = ratedLines.length ? ratedLines.reduce((sum,l) => sum + l.rate, 0) / ratedLines.length : 0;
+  const over80 = ratedLines.filter(l => l.rate >= 0.8).length;
+  const under30 = ratedLines.filter(l => l.rate < 0.3).length;
+  const totalStockVal = lines.filter(l => l.season === s).reduce((sum,l) => sum + l.stockVal, 0);
+  document.getElementById('rateKpi').innerHTML = kpiHTML([
+    { label: `${s} 평균 소진율`, val: Math.round(avg*100) + '%', sub: `${ratedLines.length}개 품목`, color: avg >= 0.7 ? 'var(--green)' : avg >= 0.4 ? 'var(--yellow)' : 'var(--red)' },
+    { label: '고소진 품목 (80%+)', val: over80 + '개', color: 'var(--green)' },
+    { label: '저소진 품목 (30% 미만)', val: under30 + '개', sub: '주의 필요', color: 'var(--red)' },
+    { label: '잔여 재고액 합계', val: '₩' + Math.round(totalStockVal/10000).toLocaleString() + '만', sub: s, color: 'var(--orange)' },
+  ]);
+
+  drawRateAnalysis(lines, s);
 }
 
 // ─── Tab switching ────────────────────────────────────────
