@@ -501,6 +501,9 @@ mark { background: rgba(91,82,224,.2); color: var(--accent); border-radius: 2px;
 </div>
 
 <script>
+// ─── 26FW 입고 예정 수량 (xlsx 기반, 상품코드 → qty) ────────
+const FW26_INCOMING = {"PD26F-SB43BLK-001-S":40,"PD26F-SB43BLK-001-M":100,"PD26F-SB43BLK-001-L":130,"PD26F-SB43BLK-001-XL":80,"PD26F-SB43LGY-001-S":20,"PD26F-SB43LGY-001-M":70,"PD26F-SB43LGY-001-L":90,"PD26F-SB43LGY-001-XL":50,"PD26F-SB41BLK-001-S":40,"PD26F-SB41BLK-001-M":120,"PD26F-SB41BLK-001-L":170,"PD26F-SB41BLK-001-XL":70,"PD26F-SB41LGY-001-S":20,"PD26F-SB41LGY-001-M":40,"PD26F-SB41LGY-001-L":70,"PD26F-SB41LGY-001-XL":40,"WJ26F-TK1BLK-002-S":30,"WJ26F-TK1BLK-002-M":100,"WJ26F-TK1BLK-002-L":140,"WJ26F-TK1BLK-002-XL":70,"WJ26F-TK1BRN-002-S":20,"WJ26F-TK1BRN-002-M":40,"WJ26F-TK1BRN-002-L":50,"WJ26F-TK1BRN-002-XL":40,"PL26F-FX4CHA-001-S":20,"PL26F-FX4CHA-001-M":80,"PL26F-FX4CHA-001-L":120,"PL26F-FX4CHA-001-XL":60,"PL26F-FX4DGY-001-S":20,"PL26F-FX4DGY-001-M":80,"PL26F-FX4DGY-001-L":110,"PL26F-FX4DGY-001-XL":70,"DJ-H26F-AT1BLK-002-M":430,"DJ-H26F-AT1BLK-002-L":500,"DJ-H26F-AT1SIL-002-M":220,"DJ-H26F-AT1SIL-002-L":280,"DJ-H26F-AT1CHA-002-M":100,"DJ-H26F-AT1CHA-002-L":150,"DJ-H26F-AT1BBK-002-M":35,"DJ-H26F-AT1BBK-002-L":45,"DJ-H26F-AT1BLU-002-M":30,"DJ-H26F-AT1BLU-002-L":40,"DJ-N26F-AT1BLK-002-M":180,"DJ-N26F-AT1BLK-002-L":220,"DJ-N26F-AT1SIL-002-M":120,"DJ-N26F-AT1SIL-002-L":150,"DJ-H26F-RN7BLK-001-M":137,"DJ-H26F-RN7BLK-001-L":252,"DJ-H26F-RN7BLK-001-XL":179,"DJ-H26F-RN7BLK-001-S":42,"DJ-H26F-RN7BLK-001-XXL":74,"PL26F-TK1BLK-002-S":40,"PL26F-TK1BLK-002-M":130,"PL26F-TK1BLK-002-L":160,"PL26F-TK1BLK-002-XL":100,"PL26F-TK1BRN-002-S":20,"PL26F-TK1BRN-002-M":50,"PL26F-TK1BRN-002-L":60,"PL26F-TK1BRN-002-XL":50,"VS26F-TRIBLK-001-S":30,"VS26F-TRIBLK-001-M":80,"VS26F-TRIBLK-001-L":140,"VS26F-TRIBLK-001-XL":50,"DJ-H26F-AT1BLK-002-S":70,"DJ-H26F-AT1BLK-002-XL":380,"DJ-H26F-AT1BLK-002-XXL":120,"DJ-H26F-AT1SIL-002-S":60,"DJ-H26F-AT1SIL-002-XL":150,"DJ-H26F-AT1SIL-002-XXL":90,"DJ-H26F-AT1CHA-002-S":40,"DJ-H26F-AT1CHA-002-XL":70,"DJ-H26F-AT1CHA-002-XXL":40,"DJ-H26F-AT1BBK-002-S":15,"DJ-H26F-AT1BBK-002-XL":35,"DJ-H26F-AT1BBK-002-XXL":20,"DJ-H26F-AT1BLU-002-S":20,"DJ-H26F-AT1BLU-002-XL":30,"DJ-H26F-AT1BLU-002-XXL":30,"DJ-N26F-AT1BLK-002-S":40,"DJ-N26F-AT1BLK-002-XL":100,"DJ-N26F-AT1BLK-002-XXL":60,"DJ-N26F-AT1SIL-002-S":30,"DJ-N26F-AT1SIL-002-XL":60,"DJ-N26F-AT1SIL-002-XXL":40,"HD26F-OT-A2BLK-002-S":80,"HD26F-OT-A2BLK-002-M":130,"HD26F-OT-A2BLK-002-L":170,"HD26F-OT-A2BLK-002-XL":120,"HD26F-OT-A2CHA-002-S":40,"HD26F-OT-A2CHA-002-M":80,"HD26F-OT-A2CHA-002-L":120,"HD26F-OT-A2CHA-002-XL":60,"PT26F-OT-A2BLK-001-S":30,"PT26F-OT-A2BLK-001-M":80,"PT26F-OT-A2BLK-001-L":120,"PT26F-OT-A2BLK-001-XL":70,"PT26F-OT-A2CHA-001-S":30,"PT26F-OT-A2CHA-001-M":70,"PT26F-OT-A2CHA-001-L":110,"PT26F-OT-A2CHA-001-XL":60,"HD26F-OT-A1BLK-001-S":30,"HD26F-OT-A1BLK-001-M":80,"HD26F-OT-A1BLK-001-L":100,"HD26F-OT-A1BLK-001-XL":60,"HD26F-OT-A1BRN-001-S":20,"HD26F-OT-A1BRN-001-M":40,"HD26F-OT-A1BRN-001-L":50,"HD26F-OT-A1BRN-001-XL":30,"HD26F-OT-A1LGY-001-S":10,"HD26F-OT-A1LGY-001-M":30,"HD26F-OT-A1LGY-001-L":40,"HD26F-OT-A1LGY-001-XL":20,"HD26F-OT-A1CML-001-S":10,"HD26F-OT-A1CML-001-M":20,"HD26F-OT-A1CML-001-L":40,"HD26F-OT-A1CML-001-XL":30,"TL26F-OT-A1BLK-001-S":30,"TL26F-OT-A1BLK-001-M":50,"TL26F-OT-A1BLK-001-L":60,"TL26F-OT-A1BLK-001-XL":50,"TL26F-OT-A1BRN-001-S":10,"TL26F-OT-A1BRN-001-M":20,"TL26F-OT-A1BRN-001-L":40,"TL26F-OT-A1BRN-001-XL":30,"TL26F-OT-A1LGY-001-S":10,"TL26F-OT-A1LGY-001-M":30,"TL26F-OT-A1LGY-001-L":40,"TL26F-OT-A1LGY-001-XL":20,"TL26F-OT-A1CML-001-S":10,"TL26F-OT-A1CML-001-M":40,"TL26F-OT-A1CML-001-L":20,"TL26F-OT-A1CML-001-XL":30,"HD26F-DU4BLK-001-S":40,"HD26F-DU4BLK-001-M":110,"HD26F-DU4BLK-001-L":150,"HD26F-DU4BLK-001-XL":100,"HD26F-400BLK-002-S":30,"HD26F-400BLK-002-M":100,"HD26F-400BLK-002-L":140,"HD26F-400BLK-002-XL":80,"HD26F-400LGY-002-S":50,"HD26F-400LGY-002-M":100,"HD26F-400LGY-002-L":160,"HD26F-400LGY-002-XL":90,"HD26F-402CHA-002-S":20,"HD26F-402CHA-002-M":50,"HD26F-402CHA-002-L":60,"HD26F-402CHA-002-XL":40,"HD26F-402BRN-002-S":20,"HD26F-402BRN-002-M":40,"HD26F-402BRN-002-L":50,"HD26F-402BRN-002-XL":60,"TL26F-PW1BLK-001-S":30,"TL26F-PW1BLK-001-M":70,"TL26F-PW1BLK-001-L":90,"TL26F-PW1BLK-001-XL":60,"TL26F-PW1CHA-001-S":15,"TL26F-PW1CHA-001-M":40,"TL26F-PW1CHA-001-L":50,"TL26F-PW1CHA-001-XL":45,"HD26F-PW1BLK-001-S":30,"HD26F-PW1BLK-001-M":90,"HD26F-PW1BLK-001-L":100,"HD26F-PW1BLK-001-XL":80,"HD26F-PW1CHA-001-S":30,"HD26F-PW1CHA-001-M":70,"HD26F-PW1CHA-001-L":90,"HD26F-PW1CHA-001-XL":60,"DJ-H26F-RN7BEG-001-S":42,"DJ-H26F-RN7BEG-001-M":63,"DJ-H26F-RN7BEG-001-L":74,"DJ-H26F-RN7BEG-001-XL":53,"DJ-H26F-RN7BEG-001-XXL":21,"DJ-H26F-RN7ORG-001-S":21,"DJ-H26F-RN7ORG-001-M":27,"DJ-H26F-RN7ORG-001-L":32,"DJ-H26F-RN7ORG-001-XL":21,"DJ-H26F-RN7ORG-001-XXL":16,"AC26F-400BLK-002-OS":150,"AC26F-400LGY-002-OS":150,"AC26F-400BLK-001-OS":100,"AC26F-400LGY-001-OS":100,"AC26F-TK1BLK-001-OS":320,"DJ-H26F-SB43BLK-004-S":20,"DJ-H26F-SB43BLK-004-M":100,"DJ-H26F-SB43BLK-004-L":120,"DJ-H26F-SB43BLK-004-XL":60,"DJ-H26F-SB43BRN-004-S":20,"DJ-H26F-SB43BRN-004-M":60,"DJ-H26F-SB43BRN-004-L":80,"DJ-H26F-SB43BRN-004-XL":40,"DJ-H26F-CORBLK-002-S":20,"DJ-H26F-CORBLK-002-M":80,"DJ-H26F-CORBLK-002-L":100,"DJ-H26F-CORBLK-002-XL":40,"DJ-H26F-CORKHG-002-S":10,"DJ-H26F-CORKHG-002-M":40,"DJ-H26F-CORKHG-002-L":70,"DJ-H26F-CORKHG-002-XL":40};
+
 // ─── Constants ───────────────────────────────────────────
 const SHEET  = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0';
 const GID    = '1461767551';
@@ -1267,12 +1270,25 @@ function drawSeasonProgress() {
       const totalProd   = seasonMeta.reduce((s,m) => s + m.total, 0);
       const totalOrders = seasonMeta.reduce((s,m) => s + m.orders, 0);
       if (totalProd > 0) {
-        // 26FW 등 사전구매 시즌: 주문수량/생산수량 (창고재고 기준 아님)
         const isSalesSeason = whTotal > 0 && totalProd > 0;
         ratePct = isSalesSeason
           ? Math.min(100, Math.round((totalProd - whTotal) / totalProd * 100))
           : Math.min(100, Math.round(totalOrders / totalProd * 100));
       }
+    }
+    // 26FW 폴백: FW26_INCOMING 기반 소진율 (apparelMeta 없는 경우)
+    if (ratePct === null && season === '26FW') {
+      let fw26Total = 0, fw26Sold = 0;
+      rows.forEach(r => {
+        if (str(r, C.season) !== '26FW') return;
+        const code = str(r, C.code);
+        const wh   = num(r, C.warehouse);
+        const incoming = FW26_INCOMING[code] || 0;
+        if (incoming === 0) return;
+        fw26Total += incoming;
+        fw26Sold  += wh < 0 ? Math.abs(wh) : Math.max(0, incoming - wh);
+      });
+      if (fw26Total > 0) ratePct = Math.min(100, Math.round(fw26Sold / fw26Total * 100));
     }
 
     // 마감까지 남은 시간 상태
@@ -1774,6 +1790,7 @@ function buildRateLines() {
   // ② 메인 시트에만 있는 항목 (25FW, 25SS, 24FW, 24SS 등)
   // 라인별로 묶어서 입고합계 → 소진율 근사치 계산
   const mainLineMap = {};
+  const fw26LineMap = {}; // 26FW: FW26_INCOMING 기반 소진율 계산
   rows.forEach(r => {
     const n       = str(r, C.name);
     const season  = str(r, C.season);
@@ -1781,8 +1798,23 @@ function buildRateLines() {
     const wh      = num(r, C.warehouse);
     const pr      = num(r, C.price);
     const rc      = num(r, C.receipt);
+    const code    = str(r, C.code);
     if (!n || !season) return;
     if (metaNames.has(n)) return; // GID2에 있는 것은 건너뜀
+
+    if (season === '26FW') {
+      const incoming = FW26_INCOMING[code] || 0;
+      if (incoming === 0) return;
+      const sold = wh < 0 ? Math.abs(wh) : Math.max(0, incoming - wh);
+      const key = lineKey(line, n);
+      if (!fw26LineMap[key]) fw26LineMap[key] = { line: key, season: '26FW', total: 0, sold: 0, whQty: 0, price: pr, names: [] };
+      fw26LineMap[key].total += incoming;
+      fw26LineMap[key].sold  += sold;
+      fw26LineMap[key].whQty += wh;
+      if (!fw26LineMap[key].price && pr) fw26LineMap[key].price = pr;
+      if (!fw26LineMap[key].names.includes(n)) fw26LineMap[key].names.push(n);
+      return;
+    }
 
     const key = lineKey(line, n);
     if (!mainLineMap[key]) mainLineMap[key] = { line: key, season, receipt: 0, whQty: 0, price: pr, names: [] };
@@ -1791,6 +1823,22 @@ function buildRateLines() {
     if (!mainLineMap[key].price && pr) mainLineMap[key].price = pr;
     if (!mainLineMap[key].names.includes(n)) mainLineMap[key].names.push(n);
   });
+
+  // 26FW → lineMap (rate 사전 계산)
+  Object.values(fw26LineMap).forEach(g => {
+    if (!lineMap[g.line]) {
+      const whQtyEff = Math.max(0, g.whQty);
+      const rate = g.total > 0 ? Math.min(1, g.sold / g.total) : null;
+      lineMap[g.line] = {
+        line: g.line, season: g.season,
+        total: g.total, orders: g.sold,
+        whQty: whQtyEff, price: g.price, names: g.names,
+        fromMeta: false, isFW26: true,
+        rate, stockVal: whQtyEff * g.price,
+      };
+    }
+  });
+
   Object.values(mainLineMap).forEach(g => {
     if (!lineMap[g.line]) {
       lineMap[g.line] = {
@@ -1804,6 +1852,7 @@ function buildRateLines() {
 
   // ③ GID2 항목 창고재고/원가 집계
   Object.values(lineMap).forEach(g => {
+    if (g.isFW26) return; // 26FW는 이미 rate/stockVal 계산 완료
     if (g.fromMeta) {
       g.names.forEach(n => {
         const w = whMap[n];
