@@ -1291,7 +1291,7 @@ function drawSeasonProgress() {
       Object.entries(nameWh).forEach(([n, wh]) => {
         const incoming = FW26_BY_NAME[n] || 0;
         fw26Total += incoming;
-        fw26Sold  += wh < 0 ? Math.abs(wh) : Math.max(0, incoming - wh);
+        fw26Sold  += wh < 0 ? Math.abs(wh) : (wh === 0 ? 0 : Math.max(0, incoming - wh));
       });
       if (fw26Total > 0) ratePct = Math.min(100, Math.round(fw26Sold / fw26Total * 100));
     }
@@ -1832,8 +1832,8 @@ function buildRateLines() {
   // 26FW → lineMap (rate 사전 계산)
   Object.values(fw26LineMap).forEach(g => {
     if (!lineMap[g.line]) {
-      // sold: 총재고가 음수(사전구매)면 abs(wh), 아니면 입고수량-현재고
-      const sold = g.whQty < 0 ? Math.abs(g.whQty) : Math.max(0, g.total - g.whQty);
+      // sold: wh<0 → 사전구매 판매, wh=0 → 미입고(판매 0), wh>0 → 입고 후 실판매
+      const sold = g.whQty < 0 ? Math.abs(g.whQty) : (g.whQty === 0 ? 0 : Math.max(0, g.total - g.whQty));
       const rate = g.total > 0 ? Math.min(1, sold / g.total) : null;
       const whQtyEff = Math.max(0, g.whQty);
       lineMap[g.line] = {
