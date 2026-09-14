@@ -501,8 +501,8 @@ mark { background: rgba(91,82,224,.2); color: var(--accent); border-radius: 2px;
 </div>
 
 <script>
-// ─── 26FW 입고 예정 수량 (xlsx 기반, 상품코드 → qty) ────────
-const FW26_INCOMING = {"PD26F-SB43BLK-001-S":40,"PD26F-SB43BLK-001-M":100,"PD26F-SB43BLK-001-L":130,"PD26F-SB43BLK-001-XL":80,"PD26F-SB43LGY-001-S":20,"PD26F-SB43LGY-001-M":70,"PD26F-SB43LGY-001-L":90,"PD26F-SB43LGY-001-XL":50,"PD26F-SB41BLK-001-S":40,"PD26F-SB41BLK-001-M":120,"PD26F-SB41BLK-001-L":170,"PD26F-SB41BLK-001-XL":70,"PD26F-SB41LGY-001-S":20,"PD26F-SB41LGY-001-M":40,"PD26F-SB41LGY-001-L":70,"PD26F-SB41LGY-001-XL":40,"WJ26F-TK1BLK-002-S":30,"WJ26F-TK1BLK-002-M":100,"WJ26F-TK1BLK-002-L":140,"WJ26F-TK1BLK-002-XL":70,"WJ26F-TK1BRN-002-S":20,"WJ26F-TK1BRN-002-M":40,"WJ26F-TK1BRN-002-L":50,"WJ26F-TK1BRN-002-XL":40,"PL26F-FX4CHA-001-S":20,"PL26F-FX4CHA-001-M":80,"PL26F-FX4CHA-001-L":120,"PL26F-FX4CHA-001-XL":60,"PL26F-FX4DGY-001-S":20,"PL26F-FX4DGY-001-M":80,"PL26F-FX4DGY-001-L":110,"PL26F-FX4DGY-001-XL":70,"DJ-H26F-AT1BLK-002-M":430,"DJ-H26F-AT1BLK-002-L":500,"DJ-H26F-AT1SIL-002-M":220,"DJ-H26F-AT1SIL-002-L":280,"DJ-H26F-AT1CHA-002-M":100,"DJ-H26F-AT1CHA-002-L":150,"DJ-H26F-AT1BBK-002-M":35,"DJ-H26F-AT1BBK-002-L":45,"DJ-H26F-AT1BLU-002-M":30,"DJ-H26F-AT1BLU-002-L":40,"DJ-N26F-AT1BLK-002-M":180,"DJ-N26F-AT1BLK-002-L":220,"DJ-N26F-AT1SIL-002-M":120,"DJ-N26F-AT1SIL-002-L":150,"DJ-H26F-RN7BLK-001-M":137,"DJ-H26F-RN7BLK-001-L":252,"DJ-H26F-RN7BLK-001-XL":179,"DJ-H26F-RN7BLK-001-S":42,"DJ-H26F-RN7BLK-001-XXL":74,"PL26F-TK1BLK-002-S":40,"PL26F-TK1BLK-002-M":130,"PL26F-TK1BLK-002-L":160,"PL26F-TK1BLK-002-XL":100,"PL26F-TK1BRN-002-S":20,"PL26F-TK1BRN-002-M":50,"PL26F-TK1BRN-002-L":60,"PL26F-TK1BRN-002-XL":50,"VS26F-TRIBLK-001-S":30,"VS26F-TRIBLK-001-M":80,"VS26F-TRIBLK-001-L":140,"VS26F-TRIBLK-001-XL":50,"DJ-H26F-AT1BLK-002-S":70,"DJ-H26F-AT1BLK-002-XL":380,"DJ-H26F-AT1BLK-002-XXL":120,"DJ-H26F-AT1SIL-002-S":60,"DJ-H26F-AT1SIL-002-XL":150,"DJ-H26F-AT1SIL-002-XXL":90,"DJ-H26F-AT1CHA-002-S":40,"DJ-H26F-AT1CHA-002-XL":70,"DJ-H26F-AT1CHA-002-XXL":40,"DJ-H26F-AT1BBK-002-S":15,"DJ-H26F-AT1BBK-002-XL":35,"DJ-H26F-AT1BBK-002-XXL":20,"DJ-H26F-AT1BLU-002-S":20,"DJ-H26F-AT1BLU-002-XL":30,"DJ-H26F-AT1BLU-002-XXL":30,"DJ-N26F-AT1BLK-002-S":40,"DJ-N26F-AT1BLK-002-XL":100,"DJ-N26F-AT1BLK-002-XXL":60,"DJ-N26F-AT1SIL-002-S":30,"DJ-N26F-AT1SIL-002-XL":60,"DJ-N26F-AT1SIL-002-XXL":40,"HD26F-OT-A2BLK-002-S":80,"HD26F-OT-A2BLK-002-M":130,"HD26F-OT-A2BLK-002-L":170,"HD26F-OT-A2BLK-002-XL":120,"HD26F-OT-A2CHA-002-S":40,"HD26F-OT-A2CHA-002-M":80,"HD26F-OT-A2CHA-002-L":120,"HD26F-OT-A2CHA-002-XL":60,"PT26F-OT-A2BLK-001-S":30,"PT26F-OT-A2BLK-001-M":80,"PT26F-OT-A2BLK-001-L":120,"PT26F-OT-A2BLK-001-XL":70,"PT26F-OT-A2CHA-001-S":30,"PT26F-OT-A2CHA-001-M":70,"PT26F-OT-A2CHA-001-L":110,"PT26F-OT-A2CHA-001-XL":60,"HD26F-OT-A1BLK-001-S":30,"HD26F-OT-A1BLK-001-M":80,"HD26F-OT-A1BLK-001-L":100,"HD26F-OT-A1BLK-001-XL":60,"HD26F-OT-A1BRN-001-S":20,"HD26F-OT-A1BRN-001-M":40,"HD26F-OT-A1BRN-001-L":50,"HD26F-OT-A1BRN-001-XL":30,"HD26F-OT-A1LGY-001-S":10,"HD26F-OT-A1LGY-001-M":30,"HD26F-OT-A1LGY-001-L":40,"HD26F-OT-A1LGY-001-XL":20,"HD26F-OT-A1CML-001-S":10,"HD26F-OT-A1CML-001-M":20,"HD26F-OT-A1CML-001-L":40,"HD26F-OT-A1CML-001-XL":30,"TL26F-OT-A1BLK-001-S":30,"TL26F-OT-A1BLK-001-M":50,"TL26F-OT-A1BLK-001-L":60,"TL26F-OT-A1BLK-001-XL":50,"TL26F-OT-A1BRN-001-S":10,"TL26F-OT-A1BRN-001-M":20,"TL26F-OT-A1BRN-001-L":40,"TL26F-OT-A1BRN-001-XL":30,"TL26F-OT-A1LGY-001-S":10,"TL26F-OT-A1LGY-001-M":30,"TL26F-OT-A1LGY-001-L":40,"TL26F-OT-A1LGY-001-XL":20,"TL26F-OT-A1CML-001-S":10,"TL26F-OT-A1CML-001-M":40,"TL26F-OT-A1CML-001-L":20,"TL26F-OT-A1CML-001-XL":30,"HD26F-DU4BLK-001-S":40,"HD26F-DU4BLK-001-M":110,"HD26F-DU4BLK-001-L":150,"HD26F-DU4BLK-001-XL":100,"HD26F-400BLK-002-S":30,"HD26F-400BLK-002-M":100,"HD26F-400BLK-002-L":140,"HD26F-400BLK-002-XL":80,"HD26F-400LGY-002-S":50,"HD26F-400LGY-002-M":100,"HD26F-400LGY-002-L":160,"HD26F-400LGY-002-XL":90,"HD26F-402CHA-002-S":20,"HD26F-402CHA-002-M":50,"HD26F-402CHA-002-L":60,"HD26F-402CHA-002-XL":40,"HD26F-402BRN-002-S":20,"HD26F-402BRN-002-M":40,"HD26F-402BRN-002-L":50,"HD26F-402BRN-002-XL":60,"TL26F-PW1BLK-001-S":30,"TL26F-PW1BLK-001-M":70,"TL26F-PW1BLK-001-L":90,"TL26F-PW1BLK-001-XL":60,"TL26F-PW1CHA-001-S":15,"TL26F-PW1CHA-001-M":40,"TL26F-PW1CHA-001-L":50,"TL26F-PW1CHA-001-XL":45,"HD26F-PW1BLK-001-S":30,"HD26F-PW1BLK-001-M":90,"HD26F-PW1BLK-001-L":100,"HD26F-PW1BLK-001-XL":80,"HD26F-PW1CHA-001-S":30,"HD26F-PW1CHA-001-M":70,"HD26F-PW1CHA-001-L":90,"HD26F-PW1CHA-001-XL":60,"DJ-H26F-RN7BEG-001-S":42,"DJ-H26F-RN7BEG-001-M":63,"DJ-H26F-RN7BEG-001-L":74,"DJ-H26F-RN7BEG-001-XL":53,"DJ-H26F-RN7BEG-001-XXL":21,"DJ-H26F-RN7ORG-001-S":21,"DJ-H26F-RN7ORG-001-M":27,"DJ-H26F-RN7ORG-001-L":32,"DJ-H26F-RN7ORG-001-XL":21,"DJ-H26F-RN7ORG-001-XXL":16,"AC26F-400BLK-002-OS":150,"AC26F-400LGY-002-OS":150,"AC26F-400BLK-001-OS":100,"AC26F-400LGY-001-OS":100,"AC26F-TK1BLK-001-OS":320,"DJ-H26F-SB43BLK-004-S":20,"DJ-H26F-SB43BLK-004-M":100,"DJ-H26F-SB43BLK-004-L":120,"DJ-H26F-SB43BLK-004-XL":60,"DJ-H26F-SB43BRN-004-S":20,"DJ-H26F-SB43BRN-004-M":60,"DJ-H26F-SB43BRN-004-L":80,"DJ-H26F-SB43BRN-004-XL":40,"DJ-H26F-CORBLK-002-S":20,"DJ-H26F-CORBLK-002-M":80,"DJ-H26F-CORBLK-002-L":100,"DJ-H26F-CORBLK-002-XL":40,"DJ-H26F-CORKHG-002-S":10,"DJ-H26F-CORKHG-002-M":40,"DJ-H26F-CORKHG-002-L":70,"DJ-H26F-CORKHG-002-XL":40};
+// ─── 26FW 입고 예정 수량 (xlsx 기반, 상품명 → 전체 사이즈 합산 qty) ────────
+const FW26_BY_NAME = {"[26FW] 써모코어 액티브 후드 재킷 블랙":350,"[26FW] 써모코어 액티브 후드 재킷 라이트 그레이":230,"[26FW] 써모코어 액티브 빌레이 파카 블랙":400,"[26FW] 써모코어 액티브 빌레이 파카 라이트 그레이":170,"[26FW] 제로인 옥타 하이브리드 쉘 후드 재킷 블랙":340,"[26FW] 제로인 옥타 하이브리드 쉘 후드 재킷 브라운":150,"[26FW] 이지모드 프라임플렉스 써모 팬츠 차콜":280,"[26FW] 이지모드 프라임플렉스 써모 팬츠 다크 그레이":280,"[26FW] 에일러론 울트라 1000 SUL 후드 다운 재킷 블랙":1500,"[26FW] 에일러론 울트라 1000 SUL 후드 다운 재킷 실버":800,"[26FW] 에일러론 울트라 1000 SUL 후드 다운 재킷 차콜":400,"[26FW] 에일러론 울트라 1000 SUL 후드 다운 재킷 블루 블랙":150,"[26FW] 에일러론 울트라 1000 SUL 후드 다운 재킷 블루":150,"[26FW] 에일러론 울트라 1000 SUL 다운 재킷 블랙":600,"[26FW] 에일러론 울트라 1000 SUL 다운 재킷 실버":400,"[26FW] 에일러론 울트라 1000 SUL 7D 후드 다운 재킷 블랙":684,"[26FW] 제로인 옥타 인슐레이션 팬츠 블랙":430,"[26FW] 제로인 옥타 인슐레이션 팬츠 브라운":180,"[26FW] 제로인 옥타 하이브리드 쉘 베스트 블랙":300,"[26FW] 제로인 옥타 에어 베이스 레이어 후디 블랙":500,"[26FW] 제로인 옥타 에어 베이스 레이어 후디 차콜":300,"[26FW] 제로인 옥타 에어 타이즈 블랙":300,"[26FW] 제로인 옥타 에어 타이즈 차콜":270,"[26FW] 제로인 옥타 에어 후디 블랙":270,"[26FW] 제로인 옥타 에어 후디 브라운":140,"[26FW] 제로인 옥타 에어 후디 라이트 그레이":100,"[26FW] 제로인 옥타 에어 후디 카멜":100,"[26FW] 제로인 옥타 에어 롱슬리브 티셔츠 블랙":190,"[26FW] 제로인 옥타 에어 롱슬리브 티셔츠 브라운":100,"[26FW] 제로인 옥타 에어 롱슬리브 티셔츠 라이트 그레이":100,"[26FW] 제로인 옥타 에어 롱슬리브 티셔츠 카멜":100,"[26FW] 플랩 가루이시 후디 블랙":400,"[26FW] 플랩 90 폴라텍 알파 다이렉트 후디 블랙":350,"[26FW] 플랩 90 폴라텍 알파 다이렉트 후디 라이트 그레이":400,"[26FW] 플랩 190 폴라텍 알파 다이렉트 후디 차콜":170,"[26FW] 플랩 190 폴라텍 알파 다이렉트 후디 브라운":170,"[26FW] 메리노 울 롱슬리브 티셔츠 블랙":250,"[26FW] 메리노 울 롱슬리브 티셔츠 차콜":150,"[26FW] 메리노 울 후디 블랙":300,"[26FW] 메리노 울 후디 차콜":250,"[26FW] 에일러론 울트라 1000 SUL 7D 후드 다운 재킷 베이지":253,"[26FW] 에일러론 울트라 1000 SUL 7D 후드 다운 재킷 오렌지":117,"[26FW] 플랩 90 폴라텍 알파 다이렉트 넥 워머 블랙":150,"[26FW] 플랩 90 폴라텍 알파 다이렉트 넥 워머 라이트 그레이":150,"[26FW] 플랩 90 폴라텍 알파 다이렉트 바라클라바 블랙":100,"[26FW] 플랩 90 폴라텍 알파 다이렉트 바라클라바 라이트 그레이":100,"[26FW] 제로인 옥타 하이브리드 캡 블랙":320,"[26FW] 에일러론 900 UL 후드 다운 재킷 블랙":300,"[26FW] 에일러론 900 UL 후드 다운 재킷 브라운":200,"[26FW] 에일러론 900 익스페디션 다운 파카 블랙":240,"[26FW] 에일러론 900 익스페디션 다운 파카 카키 그레이":160};
 
 // ─── Constants ───────────────────────────────────────────
 const SHEET  = '1ykrQdlyTKAHmf3qgtfAwHLiLgNeFJ5WD3n0wmjxU4I0';
@@ -1276,15 +1276,20 @@ function drawSeasonProgress() {
           : Math.min(100, Math.round(totalOrders / totalProd * 100));
       }
     }
-    // 26FW 폴백: FW26_INCOMING 기반 소진율 (apparelMeta 없는 경우)
+    // 26FW 폴백: FW26_BY_NAME 기반 소진율 (apparelMeta 없는 경우)
     if (ratePct === null && season === '26FW') {
-      let fw26Total = 0, fw26Sold = 0;
+      // 상품명별로 집계 (사이즈 행 중복 방지)
+      const nameWh = {}; // 상품명 → 누적 창고재고
       rows.forEach(r => {
         if (str(r, C.season) !== '26FW') return;
-        const code = str(r, C.code);
-        const wh   = num(r, C.warehouse);
-        const incoming = FW26_INCOMING[code] || 0;
-        if (incoming === 0) return;
+        const n  = str(r, C.name);
+        const wh = num(r, C.warehouse);
+        if (!FW26_BY_NAME[n]) return;
+        nameWh[n] = (nameWh[n] || 0) + wh;
+      });
+      let fw26Total = 0, fw26Sold = 0;
+      Object.entries(nameWh).forEach(([n, wh]) => {
+        const incoming = FW26_BY_NAME[n] || 0;
         fw26Total += incoming;
         fw26Sold  += wh < 0 ? Math.abs(wh) : Math.max(0, incoming - wh);
       });
@@ -1803,13 +1808,13 @@ function buildRateLines() {
     if (metaNames.has(n)) return; // GID2에 있는 것은 건너뜀
 
     if (season === '26FW') {
-      const incoming = FW26_INCOMING[code] || 0;
+      const incoming = FW26_BY_NAME[n] || 0;
       if (incoming === 0) return;
-      const sold = wh < 0 ? Math.abs(wh) : Math.max(0, incoming - wh);
       const key = lineKey(line, n);
-      if (!fw26LineMap[key]) fw26LineMap[key] = { line: key, season: '26FW', total: 0, sold: 0, whQty: 0, price: pr, names: [] };
-      fw26LineMap[key].total += incoming;
-      fw26LineMap[key].sold  += sold;
+      if (!fw26LineMap[key]) {
+        // total은 상품명 기준 1회만 집계 (사이즈 여러 행이 같은 이름 공유)
+        fw26LineMap[key] = { line: key, season: '26FW', total: incoming, whQty: 0, price: pr, names: [] };
+      }
       fw26LineMap[key].whQty += wh;
       if (!fw26LineMap[key].price && pr) fw26LineMap[key].price = pr;
       if (!fw26LineMap[key].names.includes(n)) fw26LineMap[key].names.push(n);
@@ -1827,11 +1832,13 @@ function buildRateLines() {
   // 26FW → lineMap (rate 사전 계산)
   Object.values(fw26LineMap).forEach(g => {
     if (!lineMap[g.line]) {
+      // sold: 총재고가 음수(사전구매)면 abs(wh), 아니면 입고수량-현재고
+      const sold = g.whQty < 0 ? Math.abs(g.whQty) : Math.max(0, g.total - g.whQty);
+      const rate = g.total > 0 ? Math.min(1, sold / g.total) : null;
       const whQtyEff = Math.max(0, g.whQty);
-      const rate = g.total > 0 ? Math.min(1, g.sold / g.total) : null;
       lineMap[g.line] = {
         line: g.line, season: g.season,
-        total: g.total, orders: g.sold,
+        total: g.total, orders: sold,
         whQty: whQtyEff, price: g.price, names: g.names,
         fromMeta: false, isFW26: true,
         rate, stockVal: whQtyEff * g.price,
