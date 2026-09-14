@@ -1278,20 +1278,19 @@ function drawSeasonProgress() {
     }
     // 26FW 폴백: FW26_BY_NAME 기반 소진율 (apparelMeta 없는 경우)
     if (ratePct === null && season === '26FW') {
-      // 상품명별로 집계 (사이즈 행 중복 방지)
-      const nameWh = {}; // 상품명 → 누적 창고재고
+      // 접수건(주문량) 합산 기반 소진율
+      const nameSold = {}; // 상품명 → 접수건 합계
       rows.forEach(r => {
         if (str(r, C.season) !== '26FW') return;
         const n  = str(r, C.name);
-        const wh = num(r, C.warehouse);
+        const rc = num(r, C.receipt);
         if (!FW26_BY_NAME[n]) return;
-        nameWh[n] = (nameWh[n] || 0) + wh;
+        nameSold[n] = (nameSold[n] || 0) + rc;
       });
       let fw26Total = 0, fw26Sold = 0;
-      Object.entries(nameWh).forEach(([n, wh]) => {
-        const incoming = FW26_BY_NAME[n] || 0;
-        fw26Total += incoming;
-        fw26Sold  += wh < 0 ? Math.abs(wh) : (wh === 0 ? 0 : Math.max(0, incoming - wh));
+      Object.entries(nameSold).forEach(([n, sold]) => {
+        fw26Total += FW26_BY_NAME[n] || 0;
+        fw26Sold  += sold;
       });
       if (fw26Total > 0) ratePct = Math.min(100, Math.round(fw26Sold / fw26Total * 100));
     }
@@ -1813,8 +1812,9 @@ function buildRateLines() {
       const key = lineKey(line, n);
       if (!fw26LineMap[key]) {
         // total은 상품명 기준 1회만 집계 (사이즈 여러 행이 같은 이름 공유)
-        fw26LineMap[key] = { line: key, season: '26FW', total: incoming, whQty: 0, price: pr, names: [] };
+        fw26LineMap[key] = { line: key, season: '26FW', total: incoming, sold: 0, whQty: 0, price: pr, names: [] };
       }
+      fw26LineMap[key].sold  += rc;  // 접수건 = 사전구매 주문량
       fw26LineMap[key].whQty += wh;
       if (!fw26LineMap[key].price && pr) fw26LineMap[key].price = pr;
       if (!fw26LineMap[key].names.includes(n)) fw26LineMap[key].names.push(n);
@@ -1832,8 +1832,8 @@ function buildRateLines() {
   // 26FW → lineMap (rate 사전 계산)
   Object.values(fw26LineMap).forEach(g => {
     if (!lineMap[g.line]) {
-      // sold: wh<0 → 사전구매 판매, wh=0 → 미입고(판매 0), wh>0 → 입고 후 실판매
-      const sold = g.whQty < 0 ? Math.abs(g.whQty) : (g.whQty === 0 ? 0 : Math.max(0, g.total - g.whQty));
+      // 접수건 합계 = 사전구매 주문량
+      const sold = g.sold;
       const rate = g.total > 0 ? Math.min(1, sold / g.total) : null;
       const whQtyEff = Math.max(0, g.whQty);
       lineMap[g.line] = {
