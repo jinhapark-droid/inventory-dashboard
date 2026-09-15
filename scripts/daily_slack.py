@@ -110,8 +110,8 @@ for r in rows:
         if not sub_name:
             sub_name = '본품'
         if line not in preorder_by_line:
-            preorder_by_line[line] = []
-        preorder_by_line[line].append((sub_name, int(order)))
+            preorder_by_line[line] = {}
+        preorder_by_line[line][sub_name] = preorder_by_line[line].get(sub_name, 0) + int(order)
 
 span_days = max(len(valid_date_cols) - 1, 1)
 daily_avg = round(total_14 / span_days)
@@ -168,12 +168,12 @@ for i, (line, (qty, kind)) in enumerate(top5, 1):
 # 사전구매 재고 (라인명별 합산 + 하위 항목)
 preorder_lines = ''
 preorder_summary = {
-    line: sum(q for _, q in items)
+    line: sum(items.values())
     for line, items in preorder_by_line.items()
 }
 for line, total in sorted(preorder_summary.items(), key=lambda x: -x[1])[:5]:
     preorder_lines += f"\n{line} {total}개 발주 · 창고 미입고"
-    items = sorted(preorder_by_line[line], key=lambda x: -x[1])
+    items = sorted(preorder_by_line[line].items(), key=lambda x: -x[1])
     if len(items) > 1:
         sub_str = ', '.join(f"{sn} {sq}개" for sn, sq in items)
         preorder_lines += f"\nㄴ {sub_str}"
