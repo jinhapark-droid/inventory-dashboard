@@ -1,9 +1,9 @@
 name: Daily Slack 재고 현황
 
 on:
-  schedule:
-    - cron: '0 10 * * 1-5'  # 평일 오후 7시 KST (10:00 UTC)
-  workflow_dispatch:          # 수동 실행 가능
+  # schedule:
+  #   - cron: '0 10 * * 1-5'  # 평일 오후 7시 KST (10:00 UTC)
+  workflow_dispatch:          # 수동 실행만 가능
 
 jobs:
   send-slack:
